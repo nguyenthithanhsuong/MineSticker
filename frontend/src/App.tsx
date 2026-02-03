@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Block } from '../classes/Block';
-import { SmileyFace } from '../classes/SmileyFace';
-import { Time } from '../classes/Time';
-import { FlagCount } from '../classes/FlagCount';
-import { CharacterSprite } from '../components/CharacterSprite';
-import { BlockTexture } from '../components/BlockTexture';
-import { SmileyFaceComponent } from '../components/SmileyFaceComponent';
-import { NumberDisplay } from '../classes/NumberDisplay';
+import { Block } from './classes/Block';
+import { SmileyFace } from './classes/SmileyFace';
+import { Time } from './classes/Time';
+import { FlagCount } from './classes/FlagCount';
+import { CharacterSprite } from './components/CharacterSprite';
+import { BlockTexture } from './components/BlockTexture';
+import { SmileyFaceComponent } from './components/SmileyFaceComponent';
+import { NumberDisplay } from './classes/NumberDisplay';
 
 /**
  * NumberDisplayComponent - Renders a number display (for time and flags)
