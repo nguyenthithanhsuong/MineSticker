@@ -1,5 +1,5 @@
 /**
- * Number class - Base class for displaying numeric values
+ * NumberDisplay class - Base class for displaying numeric values
  * Can be utilized by Time and FlagCount classes
  */
 export class NumberDisplay {

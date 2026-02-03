@@ -43,18 +43,23 @@ const NumberDisplayComponent: React.FC<NumberDisplayComponentProps> = ({ display
 /**
  * App - Main MineSticker application component
  */
+
+// Game configuration constants
+const GRID_ROWS = 8;
+const GRID_COLS = 8;
+const MINE_PROBABILITY = 0.15;
+const TOTAL_MINES = 10;
+
 function App() {
   // Initialize game objects
   const [blocks] = useState<Block[][]>(() => {
-    const rows = 8;
-    const cols = 8;
     const grid: Block[][] = [];
-    for (let i = 0; i < rows; i++) {
+    for (let i = 0; i < GRID_ROWS; i++) {
       const row: Block[] = [];
-      for (let j = 0; j < cols; j++) {
+      for (let j = 0; j < GRID_COLS; j++) {
         const block = new Block(i, j);
         // Set some example mines
-        if (Math.random() < 0.15) {
+        if (Math.random() < MINE_PROBABILITY) {
           block.setMine(true);
         }
         row.push(block);
@@ -66,7 +71,7 @@ function App() {
 
   const [smileyFace] = useState(() => new SmileyFace());
   const [timeDisplay] = useState(() => new Time());
-  const [flagCount] = useState(() => new FlagCount(10));
+  const [flagCount] = useState(() => new FlagCount(TOTAL_MINES));
   const [, forceUpdate] = useState({});
 
   const handleBlockClick = (block: Block) => {
