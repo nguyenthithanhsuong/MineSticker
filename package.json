@@ -7,7 +7,7 @@
 },
   "scripts": {
     "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
-    "build": "npm run build -w server && npm run build -w client",
+    "build": "npm --workspace server run build && npm --workspace client run build",
     "install-all": "npm install && npm install -w client && npm install -w server"
   },
   "workspaces": [
