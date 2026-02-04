@@ -1432,9 +1432,9 @@ export default function App() {
             Reset to Default
           </button>
           <div style={{ fontSize: 11, color: "#555", marginTop: 12, lineHeight: 1.6 }}>
-            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Texture Credit:</div>
+            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
             <div>TDL's texture were made by ScottAndersinn</div>
-            <div>Explosion Animation and Sound effect were taken directly from AvA3!</div>
+            <div>Explosion Animation and Sound Effect were taken directly from AvA3!</div>
             <div>
               Credit to Black Squirrel for Winmine 31/NT4 and 2000+ Texture!:
               <br />
