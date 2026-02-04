@@ -9,7 +9,13 @@ export const SPRITE_SHEET = "/MineTextures.png";
 export const CHAR_SPRITE_SHEET = "/chartdl.png";
 export const IDLE_SPRITE_SHEET = "/idle.png";
 export const WALK_SPRITE_SHEET = "/walk.png";
+export const CHILLWALK_SPRITE_SHEET = "/chillwalk.png";
+export const PANIC_SPRITE_SHEET = "/panic.png";
+export const DEAD_SPRITE_SHEET = "/dead.png";
+export const KABOOM_SPRITE_SHEET = "/kaboom.png";
+export const SCORCH_SPRITE_SHEET = "/scorch.png";
 export const PLACEFLAG_SPRITE_SHEET = "/placeflag.png";
+export const CHEER_SPRITE_SHEET = "/cheer.png";
 
 export const FACE_COORDS: Record<string, TextureCoords> = {
   face1: { x1: 0, y1: 24, x2: 23, y2: 47 },
@@ -48,6 +54,8 @@ export const NUMBER_COORDS: Record<string, TextureCoords> = {
   numberd: { x1: 140, y1: 0, x2: 152, y2: 22 },
   numberb: { x1: 154, y1: 0, x2: 166, y2: 22 }
 };
+
+export const SCORCH_COORDS: TextureCoords = { x1: 0, y1: 0, x2: 199, y2: 199 };
 
 export const KEY_COORDS: Record<string, TextureCoords> = {
   keyW: { x1: 0, y1: 83, x2: 23, y2: 106 },
@@ -140,6 +148,102 @@ export const WALK_COORDS: Record<string, TextureCoords> = {
   walkRight8: { x1: 896, y1: 336, x2: 1007, y2: 447 },
   walkRight9: { x1: 1008, y1: 336, x2: 1119, y2: 447 },
   walkRight10: { x1: 1120, y1: 336, x2: 1231, y2: 447 }
+};
+
+// Chill walk animation (7 columns x 4 rows, frame size: 112x112)
+// Rows: 0=Up, 1=Left, 2=Down, 3=Right
+export const CHILLWALK_COORDS: Record<string, TextureCoords> = {
+  // Chill walk Up (row 0)
+  chillWalkUp0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  chillWalkUp1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  chillWalkUp2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  chillWalkUp3: { x1: 336, y1: 0, x2: 447, y2: 111 },
+  chillWalkUp4: { x1: 448, y1: 0, x2: 559, y2: 111 },
+  chillWalkUp5: { x1: 560, y1: 0, x2: 671, y2: 111 },
+  chillWalkUp6: { x1: 672, y1: 0, x2: 783, y2: 111 },
+
+  // Chill walk Left (row 1)
+  chillWalkLeft0: { x1: 0, y1: 112, x2: 111, y2: 223 },
+  chillWalkLeft1: { x1: 112, y1: 112, x2: 223, y2: 223 },
+  chillWalkLeft2: { x1: 224, y1: 112, x2: 335, y2: 223 },
+  chillWalkLeft3: { x1: 336, y1: 112, x2: 447, y2: 223 },
+  chillWalkLeft4: { x1: 448, y1: 112, x2: 559, y2: 223 },
+  chillWalkLeft5: { x1: 560, y1: 112, x2: 671, y2: 223 },
+  chillWalkLeft6: { x1: 672, y1: 112, x2: 783, y2: 223 },
+
+  // Chill walk Right (row 2)
+  chillWalkRight0: { x1: 0, y1: 224, x2: 111, y2: 335 },
+  chillWalkRight1: { x1: 112, y1: 224, x2: 223, y2: 335 },
+  chillWalkRight2: { x1: 224, y1: 224, x2: 335, y2: 335 },
+  chillWalkRight3: { x1: 336, y1: 224, x2: 447, y2: 335 },
+  chillWalkRight4: { x1: 448, y1: 224, x2: 559, y2: 335 },
+  chillWalkRight5: { x1: 560, y1: 224, x2: 671, y2: 335 },
+  chillWalkRight6: { x1: 672, y1: 224, x2: 783, y2: 335 },
+
+  // Chill walk Down (row 3)
+  chillWalkDown0: { x1: 0, y1: 336, x2: 111, y2: 447 },
+  chillWalkDown1: { x1: 112, y1: 336, x2: 223, y2: 447 },
+  chillWalkDown2: { x1: 224, y1: 336, x2: 335, y2: 447 },
+  chillWalkDown3: { x1: 336, y1: 336, x2: 447, y2: 447 },
+  chillWalkDown4: { x1: 448, y1: 336, x2: 559, y2: 447 },
+  chillWalkDown5: { x1: 560, y1: 336, x2: 671, y2: 447 },
+  chillWalkDown6: { x1: 672, y1: 336, x2: 783, y2: 447 }
+};
+
+// Panic animation (16 columns x 1 row, frame size: 112x112)
+export const PANIC_COORDS: Record<string, TextureCoords> = {
+  panic0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  panic1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  panic2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  panic3: { x1: 336, y1: 0, x2: 447, y2: 111 },
+  panic4: { x1: 448, y1: 0, x2: 559, y2: 111 },
+  panic5: { x1: 560, y1: 0, x2: 671, y2: 111 },
+  panic6: { x1: 672, y1: 0, x2: 783, y2: 111 },
+  panic7: { x1: 784, y1: 0, x2: 895, y2: 111 },
+  panic8: { x1: 896, y1: 0, x2: 1007, y2: 111 },
+  panic9: { x1: 1008, y1: 0, x2: 1119, y2: 111 },
+  panic10: { x1: 1120, y1: 0, x2: 1231, y2: 111 },
+  panic11: { x1: 1232, y1: 0, x2: 1343, y2: 111 },
+  panic12: { x1: 1344, y1: 0, x2: 1455, y2: 111 },
+  panic13: { x1: 1456, y1: 0, x2: 1567, y2: 111 },
+  panic14: { x1: 1568, y1: 0, x2: 1679, y2: 111 },
+  panic15: { x1: 1680, y1: 0, x2: 1791, y2: 111 }
+};
+
+// Dead pose (frame size: 112x112)
+export const DEAD_COORDS: Record<string, TextureCoords> = {
+  dead0: { x1: 0, y1: 0, x2: 111, y2: 111 }
+};
+
+// Cheer animation (4 columns x 1 row, frame size: 112x112)
+export const CHEER_COORDS: Record<string, TextureCoords> = {
+  cheer0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  cheer1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  cheer2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  cheer3: { x1: 336, y1: 0, x2: 447, y2: 111 }
+};
+
+// Kaboom animation (4 columns x 4 rows, frame size: 270x270)
+export const KABOOM_COORDS: Record<string, TextureCoords> = {
+  kaboom0: { x1: 0, y1: 0, x2: 269, y2: 269 },
+  kaboom1: { x1: 270, y1: 0, x2: 539, y2: 269 },
+  kaboom2: { x1: 540, y1: 0, x2: 809, y2: 269 },
+  kaboom3: { x1: 810, y1: 0, x2: 1079, y2: 269 },
+
+  kaboom4: { x1: 0, y1: 270, x2: 269, y2: 539 },
+  kaboom5: { x1: 270, y1: 270, x2: 539, y2: 539 },
+  kaboom6: { x1: 540, y1: 270, x2: 809, y2: 539 },
+  kaboom7: { x1: 810, y1: 270, x2: 1079, y2: 539 },
+
+  kaboom8: { x1: 0, y1: 540, x2: 269, y2: 809 },
+  kaboom9: { x1: 270, y1: 540, x2: 539, y2: 809 },
+  kaboom10: { x1: 540, y1: 540, x2: 809, y2: 809 },
+  kaboom11: { x1: 810, y1: 540, x2: 1079, y2: 809 },
+
+  kaboom12: { x1: 0, y1: 810, x2: 269, y2: 1079 },
+  kaboom13: { x1: 270, y1: 810, x2: 539, y2: 1079 },
+  kaboom14: { x1: 540, y1: 810, x2: 809, y2: 1079 },
+  kaboom15: { x1: 810, y1: 810, x2: 1079, y2: 1079 }
 };
 
 // Place Flag animation (6 columns x 8 rows, frame size: 112x112)
