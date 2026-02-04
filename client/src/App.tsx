@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   Character,
   Face,
@@ -8,6 +8,7 @@ import {
   SPRITE_SHEET,
   CHAR_SPRITE_SHEET,
   IDLE_SPRITE_SHEET,
+  INTRO_SPRITE_SHEET,
   WALK_SPRITE_SHEET,
   CHILLWALK_SPRITE_SHEET,
   PANIC_SPRITE_SHEET,
@@ -23,6 +24,7 @@ import {
   CHAR_FULL_COORDS,
   CHAR_FEET_COORDS,
   IDLE_COORDS,
+  INTRO_COORDS,
   WALK_COORDS,
   CHILLWALK_COORDS,
   PANIC_COORDS,
@@ -101,6 +103,7 @@ export default function App() {
   const kaboomAudio = useRef<HTMLAudioElement | null>(null);
   const chillWalkAudio = useRef<HTMLAudioElement | null>(null);
   const stepOnBlockAudio = useRef<HTMLAudioElement | null>(null);
+  const whooshAudio = useRef<HTMLAudioElement | null>(null);
   
   // Initialize audio on mount
   useEffect(() => {
@@ -108,9 +111,10 @@ export default function App() {
     kaboomAudio.current = new Audio("/kaboom.wav");
     chillWalkAudio.current = new Audio("/chillwalk.wav");
     stepOnBlockAudio.current = new Audio("/steponblock.wav");
+    whooshAudio.current = new Audio("/whoosh.wav");
     
     // Preload all audio
-    [flagPlaceAudio, kaboomAudio, chillWalkAudio, stepOnBlockAudio].forEach(audio => {
+    [flagPlaceAudio, kaboomAudio, chillWalkAudio, stepOnBlockAudio, whooshAudio].forEach(audio => {
       if (audio.current) {
         audio.current.preload = "auto";
         audio.current.load();
@@ -142,10 +146,14 @@ export default function App() {
   const [steppedMine, setSteppedMine] = useState<{ row: number; col: number } | null>(null);
   const [isCheer, setIsCheer] = useState(false);
   const [cheerFrameIndex, setCheerFrameIndex] = useState(0);
+  const [isIntro, setIsIntro] = useState(false);
+  const [introFrameIndex, setIntroFrameIndex] = useState(0);
+  const [introTargetPos, setIntroTargetPos] = useState<{ row: number; col: number } | null>(null);
   const [activeExplosions, setActiveExplosions] = useState<ExplosionState[]>([]);
   const [scorchMarks, setScorchMarks] = useState<ScorchState[]>([]);
   const explosionQueueRef = useRef<Array<{ row: number; col: number }>>([]);
   const explosionIdRef = useRef(0);
+  const scorchIdRef = useRef(0);
   const explosionsPlayedRef = useRef(false);
   const explosionTickRef = useRef(0);
   const shouldMirrorWalkRef = useRef(false);
@@ -154,6 +162,7 @@ export default function App() {
   const [placeFlagFrameIndex, setPlaceFlagFrameIndex] = useState(0);
   const [isRemovingFlag, setIsRemovingFlag] = useState(false);
   const [animationSpeed, setAnimationSpeed] = useState(30);
+  const INTRO_FRAME_SEQUENCE = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const GRID_SIZE = 16; // Tile size in pixels
   const KABOOM_FRAME_SIZE = 270;
   const SCORCH_FRAME_SIZE = 200;
@@ -161,6 +170,16 @@ export default function App() {
   // Count flags in the matrix
   const flagCount = localMatrix.data.flat().filter((tile: Tile) => tile.isFlagged).length;
   const remainingMines = mineCount - flagCount;
+
+  // Memoize animation interval calculations
+  const animationIntervals = useMemo(() => ({
+    base: Math.max(8, 42 * (30 / animationSpeed)),
+    intro: 50, // Fixed at 30 FPS (1000ms / 30fps = 33.33ms)
+    walk: Math.max(8, 40 * (30 / animationSpeed)),
+    flag: Math.max(8, (1000 / animationSpeed) * 2.5),
+    panic: 100, // 1600ms / 16 frames
+    cheer: 100  // 400ms / 4 frames
+  }), [animationSpeed]);
 
   // Timer effect
   useEffect(() => {
@@ -176,7 +195,6 @@ export default function App() {
   useEffect(() => {
     if (status !== "lost") return;
     if (explosionsPlayedRef.current) return;
-    if (activeExplosions.length > 0 || explosionQueueRef.current.length > 0) return;
 
     const mines: Array<{ row: number; col: number }> = [];
     for (let r = 0; r < localMatrix.rows; r += 1) {
@@ -203,21 +221,23 @@ export default function App() {
         return a.row - b.row;
       })
       .filter((_, idx) => idx % explosionFrequency === 0);
-    explosionQueueRef.current = targets;
+    
+    if (targets.length === 0) return;
+    
+    explosionQueueRef.current = targets.slice(1); // Queue remaining targets
     explosionTickRef.current = 0;
+    explosionsPlayedRef.current = true;
 
-    const first = explosionQueueRef.current.shift();
-    if (first) {
-      const scale = 0.33 + Math.random() * 0.42;
-      explosionIdRef.current += 1;
-      setActiveExplosions([{ row: first.row, col: first.col, frameIndex: 0, scale, id: explosionIdRef.current }]);
-      explosionsPlayedRef.current = true;
-      
-      // Play kaboom sound for first explosion - create new instance
-      const audio = new Audio("/kaboom.wav");
-      audio.play().catch(() => {});
-    }
-  }, [status, localMatrix, activeExplosions.length]);
+    // Trigger first explosion immediately
+    const first = targets[0];
+    const scale = 0.33 + Math.random() * 0.42;
+    explosionIdRef.current += 1;
+    setActiveExplosions([{ row: first.row, col: first.col, frameIndex: 0, scale, id: explosionIdRef.current }]);
+    
+    // Play kaboom sound for first explosion - create new instance
+    const audio = new Audio("/kaboom.wav");
+    audio.play().catch(() => {});
+  }, [status, localMatrix, gridSize, steppedMine]);
 
   // Character explosion after 1.5 seconds when status becomes lost
   useEffect(() => {
@@ -254,10 +274,7 @@ export default function App() {
     if (activeExplosions.length === 0 && explosionQueueRef.current.length === 0) return;
 
     // First 7 frames at 10 FPS (100ms), last 9 frames at 6 FPS (166.67ms)
-    const getFrameInterval = () => {
-      const minFrame = Math.min(...activeExplosions.map(e => e.frameIndex), 0);
-      return minFrame < 7 ? 100 : 166.67;
-    };
+    const frameInterval = 100; // Use constant interval, check frame in update
     
     // Determine explosion cadence based on difficulty
     let explosionCadence = 5; // Easy: 9x9
@@ -287,18 +304,23 @@ export default function App() {
       }
 
       setActiveExplosions((prev) => {
+        const scorchesToAdd: ScorchState[] = [];
+        
         const updated = prev
           .map((exp) => {
-            // Create scorch mark when explosion reaches frame 6
+            // Create scorch mark when explosion reaches frame 6 (only once)
             if (exp.frameIndex === 6) {
-              setScorchMarks((scorches) => [
-                ...scorches,
-                { row: exp.row, col: exp.col, scale: exp.scale, id: exp.id }
-              ]);
+              scorchIdRef.current += 1;
+              scorchesToAdd.push({ row: exp.row, col: exp.col, scale: exp.scale, id: scorchIdRef.current });
             }
             return { ...exp, frameIndex: exp.frameIndex + 1 };
           })
           .filter((exp) => exp.frameIndex < 16);
+        
+        // Add scorch marks in batch to prevent duplicates
+        if (scorchesToAdd.length > 0) {
+          setScorchMarks((scorches) => [...scorches, ...scorchesToAdd]);
+        }
         
         // If no explosions left and queue is empty, stop the interval
         if (updated.length === 0 && explosionQueueRef.current.length === 0) {
@@ -307,10 +329,10 @@ export default function App() {
         
         return updated;
       });
-    }, getFrameInterval());
+    }, frameInterval);
 
     return () => clearInterval(kaboomIntervalId);
-  }, [status, gridSize, activeExplosions]);
+  }, [status, gridSize]);
 
   // Trigger cheer animation when game is won and no animations are playing
   useEffect(() => {
@@ -318,28 +340,57 @@ export default function App() {
     if (isMoving || placingFlagDirection !== null) return;
     
     setIsCheer(true);
+    
+    // Play whoosh sound
+    if (whooshAudio.current) {
+      whooshAudio.current.currentTime = 0;
+      whooshAudio.current.play().catch(() => {});
+    }
   }, [status, isMoving, placingFlagDirection]);
 
   // Animation effect
   useEffect(() => {
     if (!gameStarted) return;
     
-    const baseInterval = 42; // ~24fps for animation
-    const interval = Math.max(8, baseInterval * (30 / animationSpeed));
-    
     const animationInterval = setInterval(() => {
       setAnimationFrame((prev) => (prev + 1) % 100);
-    }, interval);
+    }, animationIntervals.base);
     
     return () => clearInterval(animationInterval);
-  }, [gameStarted, animationSpeed]);
+  }, [gameStarted, animationIntervals.base]);
+
+  // Intro animation effect (plays once at game start)
+  useEffect(() => {
+    if (!isIntro) return;
+
+    const introIntervalId = setInterval(() => {
+      setIntroFrameIndex((prev) => {
+        const nextFrame = prev + 1;
+        
+        // Reveal tile and play sound at frame 6 (3rd actual intro frame)
+        if (nextFrame === 6 && introTargetPos) {
+          revealAt(introTargetPos.row, introTargetPos.col);
+          if (stepOnBlockAudio.current) {
+            stepOnBlockAudio.current.currentTime = 0;
+            stepOnBlockAudio.current.play().catch(() => {});
+          }
+        }
+        
+        if (nextFrame >= INTRO_FRAME_SEQUENCE.length) {
+          setIsIntro(false);
+          return 0;
+        }
+        return nextFrame;
+      });
+    }, animationIntervals.intro);
+
+    return () => clearInterval(introIntervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isIntro, animationIntervals.intro, introTargetPos]);
 
   // Walk animation effect
   useEffect(() => {
     if (!isMoving) return;
-    
-    const baseWalkInterval = 40;
-    const walkInterval = Math.max(8, baseWalkInterval * (30 / animationSpeed));
     
     const walkIntervalId = setInterval(() => {
       setWalkFrameIndex((prev) => {
@@ -378,16 +429,14 @@ export default function App() {
         }
         return nextFrame;
       });
-    }, walkInterval);
+    }, animationIntervals.walk);
     
     return () => clearInterval(walkIntervalId);
-  }, [isMoving, pendingCharPos, animationSpeed, isChillWalk]);
+  }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk]);
 
   // Place flag animation effect
   useEffect(() => {
     if (placingFlagDirection === null) return;
-    
-    const flagInterval = Math.max(8, (1000 / animationSpeed) * 2.5);
     
     const timeout = setTimeout(() => {
       if (isRemovingFlag) {
@@ -416,10 +465,10 @@ export default function App() {
           setPlaceFlagFrameIndex(0);
         }
       }
-    }, flagInterval);
+    }, animationIntervals.flag);
     
     return () => clearTimeout(timeout);
-  }, [placingFlagDirection, placeFlagFrameIndex, isRemovingFlag, animationSpeed]);
+  }, [placingFlagDirection, placeFlagFrameIndex, isRemovingFlag, animationIntervals.flag]);
 
   // Trigger panic after loss once walk animation finishes
   useEffect(() => {
@@ -435,7 +484,6 @@ export default function App() {
   useEffect(() => {
     if (!isPanic) return;
 
-    const panicInterval = 1600 / 16; // 1.6 seconds total / 16 frames = 100ms per frame
     const panicIntervalId = setInterval(() => {
       setPanicFrameIndex((prev) => {
         const nextFrame = prev + 1;
@@ -446,16 +494,15 @@ export default function App() {
         }
         return nextFrame;
       });
-    }, panicInterval);
+    }, animationIntervals.panic);
 
     return () => clearInterval(panicIntervalId);
-  }, [isPanic]);
+  }, [isPanic, animationIntervals.panic]);
 
   // Cheer animation effect
   useEffect(() => {
     if (!isCheer) return;
 
-    const cheerInterval = 400 / 4; // 0.4 seconds total / 4 frames = 100ms per frame
     const cheerIntervalId = setInterval(() => {
       setCheerFrameIndex((prev) => {
         const nextFrame = prev + 1;
@@ -465,7 +512,7 @@ export default function App() {
         }
         return nextFrame;
       });
-    }, cheerInterval);
+    }, animationIntervals.cheer);
 
     // Stop interval after animation completes
     const timeoutId = setTimeout(() => {
@@ -476,19 +523,13 @@ export default function App() {
       clearInterval(cheerIntervalId);
       clearTimeout(timeoutId);
     };
-  }, [isCheer]);
-
-  useEffect(() => {
-    fetch("http://localhost:3000/state")
-      .then((res) => res.json())
-      .then((data: GameState) => setState(data))
-      .catch(() => setState(null));
-  }, []);
+  }, [isCheer, animationIntervals.cheer]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!gameStarted) return; // Block input before game starts
       if (status !== "playing") return;
-      if (isMoving || placingFlagDirection !== null) return; // Block input during animations
+      if (isMoving || placingFlagDirection !== null || isIntro) return; // Block input during animations
       
       const key = e.key.toLowerCase();
 
@@ -509,6 +550,8 @@ export default function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (!gameStarted) return; // Block input before game starts
+      if (isIntro) return;
       const key = e.key.toLowerCase();
       if (!key.startsWith("arrow")) return;
 
@@ -579,14 +622,10 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, placingFlagDirection]);
+  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, placingFlagDirection, isIntro]);
 
-  useEffect(() => {
-    // Only reveal if we just started the game (first move)
-    if (status === "playing" && gameStarted && firstMove && charPos.row === 0 && charPos.col === 0) {
-      revealAt(charPos.row, charPos.col);
-    }
-  }, [status, gameStarted, firstMove]);
+  // Tile reveal now happens in intro animation at frame 6
+  // No need for auto-reveal on game start
 
   const clearAllAnimations = () => {
     setIsMoving(false);
@@ -603,11 +642,15 @@ export default function App() {
     setSteppedMine(null);
     setIsCheer(false);
     setCheerFrameIndex(0);
+    setIsIntro(false);
+    setIntroFrameIndex(0);
+    setIntroTargetPos(null);
     setActiveExplosions([]);
     setScorchMarks([]);
     explosionQueueRef.current = [];
     explosionsPlayedRef.current = false;
     explosionTickRef.current = 0;
+    scorchIdRef.current = 0;
     setPreviousWalkDirection(null);
     shouldMirrorWalkRef.current = false;
     lastWasVerticalMirroredRef.current = false;
@@ -625,12 +668,17 @@ export default function App() {
     setTimer(0);
   };
 
-  const getIdleFrame = () => {
+  const getIdleFrame = useMemo(() => {
     const frameIndex = Math.floor((animationFrame / 100) * 4) % 4;
     return IDLE_COORDS[`idle${frameIndex}`];
-  };
+  }, [animationFrame]);
 
-  const getWalkFrame = () => {
+  const getIntroFrame = useMemo(() => {
+    const frameIndex = INTRO_FRAME_SEQUENCE[introFrameIndex] ?? 0;
+    return INTRO_COORDS[`intro${frameIndex}`];
+  }, [introFrameIndex]);
+
+  const getWalkFrame = useMemo(() => {
     const directionMap: Record<string, string> = {
       "Up": "walkUp",
       "Down": "walkDown",
@@ -639,9 +687,9 @@ export default function App() {
     };
     const prefix = directionMap[lastDirection] || "walkDown";
     return WALK_COORDS[`${prefix}${walkFrameIndex}`];
-  };
+  }, [lastDirection, walkFrameIndex]);
 
-  const getChillWalkFrame = () => {
+  const getChillWalkFrame = useMemo(() => {
     const directionMap: Record<string, string> = {
       "Up": "chillWalkUp",
       "Down": "chillWalkDown",
@@ -651,11 +699,11 @@ export default function App() {
     const prefix = directionMap[lastDirection] || "chillWalkDown";
     const frameIndex = walkFrameIndex % 6;
     return CHILLWALK_COORDS[`${prefix}${frameIndex}`];
-  };
+  }, [lastDirection, walkFrameIndex]);
 
-  const getPanicFrame = () => PANIC_COORDS[`panic${panicFrameIndex}`];
+  const getPanicFrame = useMemo(() => PANIC_COORDS[`panic${panicFrameIndex}`], [panicFrameIndex]);
 
-  const getPlaceFlagFrame = () => {
+  const getPlaceFlagFrame = useMemo(() => {
     const directionMap: Record<string, string> = {
       "Up": "placeflagTop",
       "Down": "placeflagBottom",
@@ -668,9 +716,15 @@ export default function App() {
     };
     const prefix = directionMap[placingFlagDirection || "Down"] || "placeflagBottom";
     return PLACEFLAG_COORDS[`${prefix}${placeFlagFrameIndex}`];
-  };
+  }, [placingFlagDirection, placeFlagFrameIndex]);
 
-  const getCurrentCharacterSprite = () => {
+  const getCurrentCharacterSprite = useMemo(() => {
+    if (isIntro) {
+      return {
+        spriteSheet: INTRO_SPRITE_SHEET,
+        coords: getIntroFrame
+      };
+    }
     if (isDead) {
       return {
         spriteSheet: DEAD_SPRITE_SHEET,
@@ -680,26 +734,26 @@ export default function App() {
     if (isPanic) {
       return {
         spriteSheet: PANIC_SPRITE_SHEET,
-        coords: getPanicFrame()
+        coords: getPanicFrame
       };
     }
     if (placingFlagDirection !== null) {
       return {
         spriteSheet: PLACEFLAG_SPRITE_SHEET,
-        coords: getPlaceFlagFrame()
+        coords: getPlaceFlagFrame
       };
     } else if (isMoving) {
       return {
         spriteSheet: isChillWalk ? CHILLWALK_SPRITE_SHEET : WALK_SPRITE_SHEET,
-        coords: isChillWalk ? getChillWalkFrame() : getWalkFrame()
+        coords: isChillWalk ? getChillWalkFrame : getWalkFrame
       };
     } else {
       return {
         spriteSheet: IDLE_SPRITE_SHEET,
-        coords: getIdleFrame()
+        coords: getIdleFrame
       };
     }
-  };
+  }, [isIntro, isDead, isPanic, placingFlagDirection, isMoving, isChillWalk, getIntroFrame, getPanicFrame, getPlaceFlagFrame, getChillWalkFrame, getWalkFrame, getIdleFrame]);
 
   const renderThreeDigitNumber = (value: number) => {
     const digits = Math.min(Math.max(value, 0), 999).toString().padStart(3, '0').split('');
@@ -726,15 +780,15 @@ export default function App() {
     );
   };
 
-  const getFaceCoords = () => {
+  const getFaceCoords = useMemo(() => {
     if (isFacePressed) return FACE_COORDS.face2;
     if (status === "won") return FACE_COORDS.face3;
     if (status === "lost") return FACE_COORDS.face4;
     return FACE_COORDS.face1;
-  };
+  }, [isFacePressed, status]);
 
   const moveCharacter = (dr: number, dc: number) => {
-    if (status !== "playing") return;
+    if (status !== "playing" || isIntro) return;
     
     // Calculate new position
     const newRow = charPos.row + dr;
@@ -806,8 +860,8 @@ export default function App() {
       <button
         type="button"
         onClick={() => {
-          // Block input during animations
-          if (isMoving || placingFlagDirection !== null) return;
+          // Block input during animations or before game starts
+          if (!gameStarted || isMoving || placingFlagDirection !== null) return;
           onClick();
         }}
         aria-label={ariaLabel}
@@ -827,7 +881,7 @@ export default function App() {
   };
 
   const toggleFlagAt = (row: number, col: number) => {
-    if (!gameStarted || status !== "playing") return;
+    if (!gameStarted || status !== "playing" || isIntro) return;
     if (!localMatrix.inBounds(row, col)) return;
 
     // Check if tile is legal for flagging before animating
@@ -883,7 +937,10 @@ export default function App() {
       
       setGameStarted(true);
       setCharPos({ row, col });
-      revealAt(row, col);
+      setIntroTargetPos({ row, col });
+      setIsIntro(true);
+      setIntroFrameIndex(0);
+      // Tile will be revealed at frame 6 of intro animation
       return;
     }
 
@@ -1041,8 +1098,19 @@ export default function App() {
         </pre>
       </section> */}
 
-      <section style={{ marginTop: 16 }}>
-        <h2>Minesweeper (But with TDL)</h2>
+      <section style={{ marginTop: 16, overflow: "visible" }}>
+        <h2>Minesweeper (But with The Dark Lord)</h2>
+        <div className="p-4 bg-gray-900 text-white rounded-lg">
+      <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+        Inspired by Animator vs Animation 3 - Alan Becker</p>
+        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+        Please select any tile to start the game!</p>
+        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+        Use WASD to move around, and press arrow keys to place flags (two arrow key can be pressed together for diagonal flags)!</p>
+        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+         Use the on-screen WASD and arrow keys if you're on a touch device!</p>
+      
+    </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <button type="button" onClick={() => setDifficulty(9, 9, 10)}>
             Easy 9x9
@@ -1063,7 +1131,8 @@ export default function App() {
           borderBottomColor: "#808080",
           borderRightColor: "#808080",
           width: "fit-content",
-          boxShadow: "4px 4px 8px rgba(0, 0, 0, 0.3)"
+          boxShadow: "4px 4px 8px rgba(0, 0, 0, 0.3)",
+          overflow: "visible"
         }}>
           {/* Counter displays */}
           <div style={{ 
@@ -1106,7 +1175,7 @@ export default function App() {
                   border: "none",
                   backgroundColor: "transparent",
                   backgroundImage: `url(${SPRITE_SHEET})`,
-                  backgroundPosition: `-${getFaceCoords().x1}px -${getFaceCoords().y1}px`,
+                  backgroundPosition: `-${getFaceCoords.x1}px -${getFaceCoords.y1}px`,
                   backgroundSize: "auto",
                   cursor: "pointer"
                 }}
@@ -1126,7 +1195,8 @@ export default function App() {
                 background: "#f0f0f0",
                 border: "4px solid #808080",
                 borderRightColor: "#ffffff",
-                borderBottomColor: "#ffffff"
+                borderBottomColor: "#ffffff",
+                overflow: "visible"
               }}
             >
           {localMatrix.data.flat().map((tile: Tile, i: number) => {
@@ -1150,7 +1220,10 @@ export default function App() {
                     
                     setGameStarted(true);
                     setCharPos({ row, col });
-                    revealAt(row, col);
+                    setIntroTargetPos({ row, col });
+                    setIsIntro(true);
+                    setIntroFrameIndex(0);
+                    // Tile will be revealed at frame 6 of intro animation
                   }
                 }}
                 style={{
@@ -1185,7 +1258,8 @@ export default function App() {
                   pointerEvents: "none",
                   transform: `scale(${scorch.scale})`,
                   transformOrigin: "center",
-                  zIndex: 2
+                  zIndex: 2,
+                  willChange: "transform"
                 }}
               />
             );
@@ -1193,13 +1267,16 @@ export default function App() {
           </div>
           {activeExplosions.map((explosion) => {
             const kaboomCoords = KABOOM_COORDS[`kaboom${explosion.frameIndex}`];
+            const explosionTop = explosion.row * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2;
+            const explosionLeft = explosion.col * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2;
+            
             return (
               <div
-                key={explosion.id}
+                key={`explosion-${explosion.id}`}
                 style={{
                   position: "absolute",
-                  top: explosion.row * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2,
-                  left: explosion.col * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2,
+                  top: explosionTop,
+                  left: explosionLeft,
                   width: KABOOM_FRAME_SIZE,
                   height: KABOOM_FRAME_SIZE,
                   backgroundImage: `url(${KABOOM_SPRITE_SHEET})`,
@@ -1208,12 +1285,33 @@ export default function App() {
                   pointerEvents: "none",
                   transform: `scale(${explosion.scale})`,
                   transformOrigin: "center",
-                  zIndex: 11
+                  zIndex: 11,
+                  willChange: "transform"
                 }}
               />
             );
           })}
-          {gameStarted && !isCheer && (
+          {isIntro && (
+            <div
+              style={{
+                position: "absolute",
+                top: (introFrameIndex < 4
+                  ? (introTargetPos ?? charPos).row * GRID_SIZE - (112 - 16) / 2 + (-40 + introFrameIndex * 10)
+                  : (introTargetPos ?? charPos).row * GRID_SIZE - (112 - 16) / 2),
+                left: (introFrameIndex < 4
+                  ? (introTargetPos ?? charPos).col * GRID_SIZE - (112 - 16) / 2 + (-GRID_SIZE * ((introTargetPos ?? charPos).col + 2) + introFrameIndex * (GRID_SIZE * ((introTargetPos ?? charPos).col + 2))/4)
+                  : (introTargetPos ?? charPos).col * GRID_SIZE - (112 - 16) / 2),
+                width: 112,
+                height: 112,
+                backgroundImage: `url(${INTRO_SPRITE_SHEET})`,
+                backgroundPosition: `-${getIntroFrame.x1}px -${getIntroFrame.y1}px`,
+                backgroundSize: "auto",
+                pointerEvents: "none",
+                zIndex: 10
+              }}
+            />
+          )}
+          {gameStarted && !isCheer && !isIntro && (
             <div
               style={{
                 position: "absolute",
@@ -1221,8 +1319,8 @@ export default function App() {
                 left: charPos.col * GRID_SIZE - (112 - 16) / 2,
                 width: 112,
                 height: 112,
-                backgroundImage: `url(${getCurrentCharacterSprite().spriteSheet})`,
-                backgroundPosition: `-${getCurrentCharacterSprite().coords.x1}px -${getCurrentCharacterSprite().coords.y1}px`,
+                backgroundImage: `url(${getCurrentCharacterSprite.spriteSheet})`,
+                backgroundPosition: `-${getCurrentCharacterSprite.coords.x1}px -${getCurrentCharacterSprite.coords.y1}px`,
                 backgroundSize: "auto",
                 pointerEvents: "none",
                 transform: isMoving && shouldMirrorWalkRef.current ? "scaleX(-1)" : "none",

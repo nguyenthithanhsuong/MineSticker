@@ -8,6 +8,7 @@ export interface TextureCoords {
 export const SPRITE_SHEET = "/MineTextures.png";
 export const CHAR_SPRITE_SHEET = "/chartdl.png";
 export const IDLE_SPRITE_SHEET = "/idle.png";
+export const INTRO_SPRITE_SHEET = "/intro.png";
 export const WALK_SPRITE_SHEET = "/walk.png";
 export const CHILLWALK_SPRITE_SHEET = "/chillwalk.png";
 export const PANIC_SPRITE_SHEET = "/panic.png";
@@ -92,6 +93,23 @@ export const IDLE_COORDS: Record<string, TextureCoords> = {
   idle1: { x1: 112, y1: 0, x2: 223, y2: 111 },
   idle2: { x1: 224, y1: 0, x2: 335, y2: 111 },
   idle3: { x1: 336, y1: 0, x2: 447, y2: 111 }
+};
+
+// Intro animation frames (13 columns x 1 row, frame size: 112x112)
+export const INTRO_COORDS: Record<string, TextureCoords> = {
+  intro0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  intro1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  intro2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  intro3: { x1: 336, y1: 0, x2: 447, y2: 111 },
+  intro4: { x1: 448, y1: 0, x2: 559, y2: 111 },
+  intro5: { x1: 560, y1: 0, x2: 671, y2: 111 },
+  intro6: { x1: 672, y1: 0, x2: 783, y2: 111 },
+  intro7: { x1: 784, y1: 0, x2: 895, y2: 111 },
+  intro8: { x1: 896, y1: 0, x2: 1007, y2: 111 },
+  intro9: { x1: 1008, y1: 0, x2: 1119, y2: 111 },
+  intro10: { x1: 1120, y1: 0, x2: 1231, y2: 111 },
+  intro11: { x1: 1232, y1: 0, x2: 1343, y2: 111 },
+  intro12: { x1: 1344, y1: 0, x2: 1455, y2: 111 }
 };
 
 // Walk animation (11 columns x 4 rows, frame size: 112x112)

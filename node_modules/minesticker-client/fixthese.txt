@@ -1,0 +1,2 @@
+Fix WASD logic starting game without letting tdl appear (disable WASD completely)
+Sound compatibility issue on mobile
