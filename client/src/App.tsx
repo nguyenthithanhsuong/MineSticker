@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import {
   Character,
   Face,
@@ -1521,6 +1522,7 @@ export default function App() {
           })}
         </div>
       </section> */}
+      <Analytics />
     </div>
   );
 }
