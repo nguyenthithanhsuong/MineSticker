@@ -1,7 +1,10 @@
 {
   "name": "minesticker",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "engines": {
+  "node": "18.x"
+},
   "scripts": {
     "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w server && npm run build -w client",
@@ -14,4 +17,5 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   }
+  
 }
