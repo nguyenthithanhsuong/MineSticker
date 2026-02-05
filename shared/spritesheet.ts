@@ -6,6 +6,7 @@ export interface TextureCoords {
 }
 
 export const SPRITE_SHEET = "/MineTextures.png";
+export const KEY_SPRITE_SHEET = "/MineTextures2x.png";
 export const CHAR_SPRITE_SHEET = "/chartdl.png";
 export const IDLE_SPRITE_SHEET = "/idle.png";
 export const INTRO_SPRITE_SHEET = "/intro.png";
@@ -17,6 +18,7 @@ export const KABOOM_SPRITE_SHEET = "/kaboom.png";
 export const SCORCH_SPRITE_SHEET = "/scorch.png";
 export const PLACEFLAG_SPRITE_SHEET = "/placeflag.png";
 export const CHEER_SPRITE_SHEET = "/cheer.png";
+export const DIAGONAL_SPRITE_SHEET = "/diagonal.png";
 
 export const FACE_COORDS: Record<string, TextureCoords> = {
   face1: { x1: 0, y1: 24, x2: 23, y2: 47 },
@@ -59,19 +61,18 @@ export const NUMBER_COORDS: Record<string, TextureCoords> = {
 export const SCORCH_COORDS: TextureCoords = { x1: 0, y1: 0, x2: 199, y2: 199 };
 
 export const KEY_COORDS: Record<string, TextureCoords> = {
-  keyW: { x1: 0, y1: 83, x2: 23, y2: 106 },
-  keyA: { x1: 25, y1: 83, x2: 48, y2: 106 },
-  keyS: { x1: 50, y1: 83, x2: 73, y2: 106 },
-  keyD: { x1: 75, y1: 83, x2: 98, y2: 106 },
-  keyBlank: { x1: 100, y1: 83, x2: 123, y2: 106 },
-  arrowUp: { x1: 0, y1: 108, x2: 23, y2: 131 },
-  arrowUpLeft: { x1: 25, y1: 108, x2: 48, y2: 131 },
-  arrowLeft: { x1: 50, y1: 108, x2: 73, y2: 131 },
-  arrowDownLeft: { x1: 75, y1: 108, x2: 98, y2: 131 },
-  arrowDown: { x1: 100, y1: 108, x2: 123, y2: 131 },
-  arrowDownRight: { x1: 125, y1: 108, x2: 148, y2: 131 },
-  arrowRight: { x1: 150, y1: 108, x2: 173, y2: 131 },
-  arrowUpRight: { x1: 175, y1: 108, x2: 198, y2: 131 }
+  keyW: { x1: 0, y1: 0, x2: 49, y2: 49 },
+  keyA: { x1: 50, y1: 0, x2: 99, y2: 49 },
+  keyS: { x1: 100, y1: 0, x2: 149, y2: 49 },
+  keyD: { x1: 150, y1: 0, x2: 199, y2: 49 },
+  arrowUp: { x1: 0, y1: 50, x2: 49, y2: 99 },
+  arrowUpLeft: { x1: 50, y1: 50, x2: 99, y2: 99 },
+  arrowLeft: { x1: 100, y1: 50, x2: 149, y2: 99 },
+  arrowDownLeft: { x1: 150, y1: 50, x2: 199, y2: 99 },
+  arrowDown: { x1: 200, y1: 50, x2: 249, y2: 99 },
+  arrowDownRight: { x1: 250, y1: 50, x2: 299, y2: 99 },
+  arrowRight: { x1: 300, y1: 50, x2: 349, y2: 99 },
+  arrowUpRight: { x1: 350, y1: 50, x2: 399, y2: 99 }
 };
 
 export const CHAR_FEET_COORDS: TextureCoords = {
@@ -330,4 +331,60 @@ export const PLACEFLAG_COORDS: Record<string, TextureCoords> = {
   placeflagTopRight3: { x1: 336, y1: 784, x2: 447, y2: 895 },
   placeflagTopRight4: { x1: 448, y1: 784, x2: 559, y2: 895 },
   placeflagTopRight5: { x1: 560, y1: 784, x2: 671, y2: 895 }
+};
+
+// Diagonal walk animation (11 columns x 4 rows, frame size: 112x112)
+// Rows: 0=TopLeft, 1=BottomLeft, 2=BottomRight, 3=TopRight
+export const DIAGONAL_COORDS: Record<string, TextureCoords> = {
+  // Diagonal TopLeft (row 0)
+  diagonalTopLeft0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  diagonalTopLeft1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  diagonalTopLeft2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  diagonalTopLeft3: { x1: 336, y1: 0, x2: 447, y2: 111 },
+  diagonalTopLeft4: { x1: 448, y1: 0, x2: 559, y2: 111 },
+  diagonalTopLeft5: { x1: 560, y1: 0, x2: 671, y2: 111 },
+  diagonalTopLeft6: { x1: 672, y1: 0, x2: 783, y2: 111 },
+  diagonalTopLeft7: { x1: 784, y1: 0, x2: 895, y2: 111 },
+  diagonalTopLeft8: { x1: 896, y1: 0, x2: 1007, y2: 111 },
+  diagonalTopLeft9: { x1: 1008, y1: 0, x2: 1119, y2: 111 },
+  diagonalTopLeft10: { x1: 1120, y1: 0, x2: 1231, y2: 111 },
+
+  // Diagonal BottomLeft (row 1)
+  diagonalBottomLeft0: { x1: 0, y1: 112, x2: 111, y2: 223 },
+  diagonalBottomLeft1: { x1: 112, y1: 112, x2: 223, y2: 223 },
+  diagonalBottomLeft2: { x1: 224, y1: 112, x2: 335, y2: 223 },
+  diagonalBottomLeft3: { x1: 336, y1: 112, x2: 447, y2: 223 },
+  diagonalBottomLeft4: { x1: 448, y1: 112, x2: 559, y2: 223 },
+  diagonalBottomLeft5: { x1: 560, y1: 112, x2: 671, y2: 223 },
+  diagonalBottomLeft6: { x1: 672, y1: 112, x2: 783, y2: 223 },
+  diagonalBottomLeft7: { x1: 784, y1: 112, x2: 895, y2: 223 },
+  diagonalBottomLeft8: { x1: 896, y1: 112, x2: 1007, y2: 223 },
+  diagonalBottomLeft9: { x1: 1008, y1: 112, x2: 1119, y2: 223 },
+  diagonalBottomLeft10: { x1: 1120, y1: 112, x2: 1231, y2: 223 },
+
+  // Diagonal BottomRight (row 2)
+  diagonalBottomRight0: { x1: 0, y1: 224, x2: 111, y2: 335 },
+  diagonalBottomRight1: { x1: 112, y1: 224, x2: 223, y2: 335 },
+  diagonalBottomRight2: { x1: 224, y1: 224, x2: 335, y2: 335 },
+  diagonalBottomRight3: { x1: 336, y1: 224, x2: 447, y2: 335 },
+  diagonalBottomRight4: { x1: 448, y1: 224, x2: 559, y2: 335 },
+  diagonalBottomRight5: { x1: 560, y1: 224, x2: 671, y2: 335 },
+  diagonalBottomRight6: { x1: 672, y1: 224, x2: 783, y2: 335 },
+  diagonalBottomRight7: { x1: 784, y1: 224, x2: 895, y2: 335 },
+  diagonalBottomRight8: { x1: 896, y1: 224, x2: 1007, y2: 335 },
+  diagonalBottomRight9: { x1: 1008, y1: 224, x2: 1119, y2: 335 },
+  diagonalBottomRight10: { x1: 1120, y1: 224, x2: 1231, y2: 335 },
+
+  // Diagonal TopRight (row 3)
+  diagonalTopRight0: { x1: 0, y1: 336, x2: 111, y2: 447 },
+  diagonalTopRight1: { x1: 112, y1: 336, x2: 223, y2: 447 },
+  diagonalTopRight2: { x1: 224, y1: 336, x2: 335, y2: 447 },
+  diagonalTopRight3: { x1: 336, y1: 336, x2: 447, y2: 447 },
+  diagonalTopRight4: { x1: 448, y1: 336, x2: 559, y2: 447 },
+  diagonalTopRight5: { x1: 560, y1: 336, x2: 671, y2: 447 },
+  diagonalTopRight6: { x1: 672, y1: 336, x2: 783, y2: 447 },
+  diagonalTopRight7: { x1: 784, y1: 336, x2: 895, y2: 447 },
+  diagonalTopRight8: { x1: 896, y1: 336, x2: 1007, y2: 447 },
+  diagonalTopRight9: { x1: 1008, y1: 336, x2: 1119, y2: 447 },
+  diagonalTopRight10: { x1: 1120, y1: 336, x2: 1231, y2: 447 }
 };
