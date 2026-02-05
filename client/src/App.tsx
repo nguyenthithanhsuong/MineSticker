@@ -1178,8 +1178,6 @@ export default function App() {
     if (!diagonal && isVerticalDirection) {
       const verticalDirection = newDirection === "Up" || newDirection === "Down" ? newDirection : null;
       const isSameVerticalAsLast = lastVerticalDirectionRef.current === verticalDirection;
-      console.log("[mirror] verticalDirection", verticalDirection);
-      console.log("[mirror] isSameVerticalAsLast", isSameVerticalAsLast);
       if (isSameVerticalAsLast) {
         // Alternate: if last time was mirrored, don't mirror this time, and vice versa
         const nextMirror = !lastWasVerticalMirroredRef.current;
