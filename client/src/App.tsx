@@ -63,7 +63,7 @@ interface ScorchState {
   id: number;
 }
 
-// No Guessing Mode: Mine generation that ensures the board is always solvable
+// True No Guessing Mode: Validates board is 100% solvable through logic
 class MineSolver {
   private grid: boolean[][] = [];
   private w: number;
@@ -95,73 +95,133 @@ class MineSolver {
     return count;
   }
 
-  // Check if starting position will open a safe area (has 0 adjacent mines)
-  hasZeroAdjacentMines(startX: number, startY: number): boolean {
-    return this.getMineCount(startX, startY) === 0;
-  }
+  // True solver: attempts to solve the board using only logical deduction
+  isSolvable(startX: number, startY: number): boolean {
+    // Ensure good starting area first
+    if (this.getMineCount(startX, startY) !== 0) {
+      return false;
+    }
 
-  // Flood fill to open adjacent safe squares - returns how many tiles are opened
-  private countFloodFill(x: number, y: number): number {
-    const queue: Array<[number, number]> = [[x, y]];
-    const visited = new Set<string>();
+    // Create a knowledge grid: -2 = unknown, -1 = flagged mine, 0-8 = opened
+    const knowledge: number[][] = Array(this.h).fill(null).map(() => Array(this.w).fill(-2));
+    
+    // Open the starting position with flood fill
+    this.floodFillOpen(knowledge, startX, startY);
+
+    // Check if opening is large enough
     let openedCount = 0;
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        if (knowledge[y][x] >= 0) openedCount++;
+      }
+    }
+    if (openedCount < 12) return false;
 
-    while (queue.length > 0) {
-      const [cx, cy] = queue.shift()!;
-      const key = `${cx},${cy}`;
+    // Now try to solve using logic
+    let madeProgress = true;
+    let iterations = 0;
+    const maxIterations = 100;
 
-      if (visited.has(key)) continue;
-      visited.add(key);
+    while (madeProgress && iterations < maxIterations) {
+      madeProgress = false;
+      iterations++;
 
-      if (cx < 0 || cx >= this.w || cy < 0 || cy >= this.h) continue;
-      if (this.grid[cy][cx]) continue; // Skip mines
+      // For each opened cell with a number
+      for (let y = 0; y < this.h; y++) {
+        for (let x = 0; x < this.w; x++) {
+          if (knowledge[y][x] < 0) continue;
 
-      openedCount++;
-      const mineCount = this.getMineCount(cx, cy);
+          const number = knowledge[y][x];
+          if (number === 0) continue;
 
-      if (mineCount === 0) {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = cx + dx;
-            const ny = cy + dy;
-            const nkey = `${nx},${ny}`;
-            if (!visited.has(nkey)) {
-              queue.push([nx, ny]);
+          // Count unknowns and flags around this cell
+          const neighbors = this.getNeighbors(x, y);
+          const unknowns: Array<[number, number]> = [];
+          let flagCount = 0;
+
+          for (const [nx, ny] of neighbors) {
+            if (knowledge[ny][nx] === -2) {
+              unknowns.push([nx, ny]);
+            } else if (knowledge[ny][nx] === -1) {
+              flagCount++;
+            }
+          }
+
+          const remainingMines = number - flagCount;
+
+          // Rule 1: If remaining mines == unknown count, all unknowns are mines
+          if (remainingMines > 0 && remainingMines === unknowns.length) {
+            for (const [nx, ny] of unknowns) {
+              knowledge[ny][nx] = -1;
+              madeProgress = true;
+            }
+          }
+
+          // Rule 2: If remaining mines == 0, all unknowns are safe
+          if (remainingMines === 0 && unknowns.length > 0) {
+            for (const [nx, ny] of unknowns) {
+              this.floodFillOpen(knowledge, nx, ny);
+              madeProgress = true;
             }
           }
         }
       }
     }
 
-    return openedCount;
-  }
+    // Check if we solved everything
+    let totalMines = 0;
+    let solvedCells = 0;
 
-  // Validates that the board is solvable from the starting position
-  isSolvable(startX: number, startY: number): boolean {
-    // Critical requirement: starting position AND its neighbors must have 0 adjacent mines
-    // This ensures the entire 3x3 area (which gets cleared) will cascade well
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = startX + dx;
-        const ny = startY + dy;
-        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h) {
-          if (this.getMineCount(nx, ny) > 0) {
-            // If any tile in the 3x3 area has adjacent mines, it's not ideal
-            // We want the entire area to be zeros for a good cascade
-            return false;
-          }
-        }
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        if (this.grid[y][x]) totalMines++;
+        if (knowledge[y][x] >= -1) solvedCells++;
       }
     }
 
-    // Check that starting position opens a large enough area
-    // (at least 12 tiles to ensure good opening)
-    const openedCount = this.countFloodFill(startX, startY);
-    if (openedCount < 12) {
-      return false;
-    }
+    // Board is solvable if we identified all cells (no -2 unknowns left)
+    return solvedCells === this.w * this.h;
+  }
 
-    return true;
+  private getNeighbors(x: number, y: number): Array<[number, number]> {
+    const neighbors: Array<[number, number]> = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h) {
+          neighbors.push([nx, ny]);
+        }
+      }
+    }
+    return neighbors;
+  }
+
+  private floodFillOpen(knowledge: number[][], startX: number, startY: number) {
+    const queue: Array<[number, number]> = [[startX, startY]];
+    const visited = new Set<string>();
+
+    while (queue.length > 0) {
+      const [x, y] = queue.shift()!;
+      const key = `${x},${y}`;
+
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      if (x < 0 || x >= this.w || y < 0 || y >= this.h) continue;
+      if (knowledge[y][x] >= 0) continue; // Already opened
+      if (this.grid[y][x]) continue; // Don't open mines
+
+      const count = this.getMineCount(x, y);
+      knowledge[y][x] = count;
+
+      if (count === 0) {
+        for (const [nx, ny] of this.getNeighbors(x, y)) {
+          queue.push([nx, ny]);
+        }
+      }
+    }
   }
 
   getGrid(): boolean[][] {
@@ -169,8 +229,11 @@ class MineSolver {
   }
 }
 
+// Generate a TRUE no-guessing board - 100% solvable through logic alone
 function generateNoGuessingBoard(rows: number, cols: number, mineCount: number, startRow: number, startCol: number): Matrix<Tile> {
-  const maxAttempts = 500;
+  const maxAttempts = 2000; // Increased since true solvability is harder to find
+  
+  console.log("Generating true no-guessing board...");
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const solver = new MineSolver(cols, rows);
@@ -206,10 +269,9 @@ function generateNoGuessingBoard(rows: number, cols: number, mineCount: number, 
       solver.setMine(col, row, true);
     });
 
-    // Check if this board is solvable
-    // The key requirement: starting position must have 0 adjacent mines
-    // This guarantees no guessing on the first move
+    // Check if this board is 100% solvable through logic
     if (solver.isSolvable(startCol, startRow)) {
+      console.log(`Found true no-guessing board on attempt ${attempt + 1}`);
       // Build the matrix
       const matrix = new Matrix<Tile>(rows, cols, () => new Tile("tile0"));
       positions.forEach(idx => {
@@ -220,9 +282,15 @@ function generateNoGuessingBoard(rows: number, cols: number, mineCount: number, 
       });
       return matrix;
     }
+
+    // Log progress every 100 attempts
+    if ((attempt + 1) % 100 === 0) {
+      console.log(`Still searching... attempt ${attempt + 1}/${maxAttempts}`);
+    }
   }
 
   // Fallback to random generation if no solvable board found
+  console.warn("Could not find 100% solvable board after", maxAttempts, "attempts, using classic");
   return createMatrix(rows, cols, mineCount);
 }
 
@@ -1788,7 +1856,7 @@ export default function App() {
         >
           <div className="p-4 bg-gray-900 text-white rounded-lg">
             <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Version 0.3.0 - February 6th 2026 (GMT +7) </p>
+          Version 0.3.1 - February 6th 2026 (GMT +7) </p>
         <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
           Inspired by Animator vs Animation 3 - Alan Becker</p>
           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
@@ -2666,6 +2734,7 @@ export default function App() {
             <div>Version 0.1.0: Website is Deployed (3 P.M, Feb 4, 2026) </div>
             <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Diagonal Movement, Custom Keybind, Quick Start/Restart and other Q.O.Ls!; Added Hard Reset! (Feb 5, 2026)</div>
             <div>Version 0.3.0: Added Custom Mode and No Guessing Mode [Experimental] (Feb 6, 2026)</div>
+            <div>Version 0.3.1: Improved No Guessing Mode Logic (Feb 6, 2026)</div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>  </div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
             <div>Website and TDL's texture were made by&nbsp;
