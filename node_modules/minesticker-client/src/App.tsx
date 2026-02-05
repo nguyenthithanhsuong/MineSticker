@@ -181,6 +181,7 @@ export default function App() {
   const lastWasVerticalMirroredRef = useRef(false);
   const lastVerticalDirectionRef = useRef<"Up" | "Down" | null>(null);
   const isMovingRef = useRef(false);
+  const skipNextAutoSaveRef = useRef(false);
   const [placingFlagDirection, setPlacingFlagDirection] = useState<"Up" | "Down" | "Left" | "Right" | "UpLeft" | "UpRight" | "DownLeft" | "DownRight" | null>(null);
   const [placeFlagFrameIndex, setPlaceFlagFrameIndex] = useState(0);
   const [isRemovingFlag, setIsRemovingFlag] = useState(false);
@@ -287,28 +288,48 @@ export default function App() {
     localStorage.setItem("minestickerKeyButtonScaleCollapsed", JSON.stringify(isKeyButtonScaleCollapsed));
   }, [isKeyButtonScaleCollapsed]);
 
+  const saveGameState = (
+    matrix: Matrix<Tile>,
+    overrides?: {
+      gridSize?: { rows: number; cols: number };
+      mineCount?: number;
+      charPos?: { row: number; col: number };
+      status?: GameStatus;
+      timer?: number;
+      gameStarted?: boolean;
+      firstMove?: boolean;
+    }
+  ) => {
+    const gameState = {
+      gridSize: overrides?.gridSize ?? gridSize,
+      mineCount: overrides?.mineCount ?? mineCount,
+      charPos: overrides?.charPos ?? charPos,
+      status: overrides?.status ?? status,
+      timer: overrides?.timer ?? timer,
+      gameStarted: overrides?.gameStarted ?? gameStarted,
+      firstMove: overrides?.firstMove ?? firstMove,
+      matrixData: matrix.data.map(row =>
+        row.map(tile => ({
+          texture: tile.texture,
+          isMine: tile.isMine,
+          isOpen: tile.isOpen,
+          isFlagged: tile.isFlagged
+        }))
+      )
+    };
+    localStorage.setItem("minestickerGameState", JSON.stringify(gameState));
+  };
+
   // Save game state to localStorage
   useEffect(() => {
     if (gameStarted) {
-      const gameState = {
-        gridSize,
-        mineCount,
-        charPos,
-        status,
-        timer,
-        gameStarted,
-        matrixData: localMatrix.data.map(row => 
-          row.map(tile => ({
-            texture: tile.texture,
-            isMine: tile.isMine,
-            isOpen: tile.isOpen,
-            isFlagged: tile.isFlagged
-          }))
-        )
-      };
-      localStorage.setItem("minestickerGameState", JSON.stringify(gameState));
+      if (skipNextAutoSaveRef.current) {
+        skipNextAutoSaveRef.current = false;
+        return;
+      }
+      saveGameState(localMatrix);
     }
-  }, [gridSize, mineCount, charPos, status, timer, gameStarted, localMatrix]);
+  }, [gridSize, mineCount, charPos, status, timer, gameStarted, localMatrix, firstMove]);
 
   // Load game state from localStorage on mount
   useEffect(() => {
@@ -331,6 +352,13 @@ export default function App() {
             return new Tile(tileData.texture, tileData.isMine, tileData.isOpen, tileData.isFlagged);
           });
           setLocalMatrix(matrix);
+
+          if (typeof parsed.firstMove === "boolean") {
+            setFirstMove(parsed.firstMove);
+          } else {
+            const anyOpen = parsed.matrixData?.some((row: any[]) => row.some((tile: any) => tile?.isOpen));
+            setFirstMove(!anyOpen);
+          }
         }
       } catch (e) {
         console.error("Failed to load game state:", e);
@@ -931,6 +959,7 @@ export default function App() {
   const clearAllAnimations = () => {
     setIsMoving(false);
     isMovingRef.current = false;
+    skipNextAutoSaveRef.current = false;
     setWalkFrameIndex(0);
     setIsChillWalk(false);
     setPendingCharPos(null);
@@ -1310,6 +1339,14 @@ export default function App() {
       setLocalMatrix((prev) => {
         const next = cloneMatrix(prev);
         clearStarterArea(next, row, col);
+        skipNextAutoSaveRef.current = true;
+        saveGameState(next, {
+          charPos: { row, col },
+          status: "playing",
+          timer: 0,
+          gameStarted: true,
+          firstMove: true
+        });
         return next;
       });
       
@@ -1666,6 +1703,14 @@ export default function App() {
                     setLocalMatrix((prev) => {
                       const next = cloneMatrix(prev);
                       clearStarterArea(next, row, col);
+                      skipNextAutoSaveRef.current = true;
+                      saveGameState(next, {
+                        charPos: { row, col },
+                        status: "playing",
+                        timer: 0,
+                        gameStarted: true,
+                        firstMove: true
+                      });
                       return next;
                     });
                     
