@@ -579,7 +579,7 @@ export default function App() {
           }
         }
 
-        const totalFrames = isChillWalk ? 6 : 11;
+        const totalFrames = isChillWalk && diagonalDirection === null ? 6 : 11;
         // Complete animation at final frame
         if (nextFrame >= totalFrames) {
           // Update character position after animation completes
@@ -596,7 +596,7 @@ export default function App() {
     }, animationIntervals.walk);
     
     return () => clearInterval(walkIntervalId);
-  }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk]);
+  }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk, diagonalDirection]);
 
   // Place flag animation effect
   useEffect(() => {
