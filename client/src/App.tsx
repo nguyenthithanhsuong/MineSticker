@@ -588,15 +588,33 @@ export default function App() {
         const nextFrame = prev + 1;
 
         // Play sound effects at specific frames
-        if (isChillWalk && nextFrame === 3) {
-          if (chillWalkAudio.current) {
-            chillWalkAudio.current.currentTime = 0;
-            chillWalkAudio.current.play().catch(() => {});
+        if (diagonalDirection !== null) {
+          // Diagonal movement: play at frame 5 only
+          if (nextFrame === 5) {
+            if (isChillWalk) {
+              if (chillWalkAudio.current) {
+                chillWalkAudio.current.currentTime = 0;
+                chillWalkAudio.current.play().catch(() => {});
+              }
+            } else {
+              if (stepOnBlockAudio.current) {
+                stepOnBlockAudio.current.currentTime = 0;
+                stepOnBlockAudio.current.play().catch(() => {});
+              }
+            }
           }
-        } else if (!isChillWalk && nextFrame === 6) {
-          if (chillWalkAudio.current) {
-            chillWalkAudio.current.currentTime = 0;
-            chillWalkAudio.current.play().catch(() => {});
+        } else if (diagonalDirection === null) {
+          // Cardinal movement only: original timing
+          if (isChillWalk && nextFrame === 3) {
+            if (chillWalkAudio.current) {
+              chillWalkAudio.current.currentTime = 0;
+              chillWalkAudio.current.play().catch(() => {});
+            }
+          } else if (!isChillWalk && nextFrame === 6) {
+            if (chillWalkAudio.current) {
+              chillWalkAudio.current.currentTime = 0;
+              chillWalkAudio.current.play().catch(() => {});
+            }
           }
         }
 
@@ -1233,16 +1251,18 @@ export default function App() {
     setIsChillWalk(shouldChillWalk);
     setPendingCharPos({ row: newRow, col: newCol });
     
-    // Play initial walk sound
-    if (shouldChillWalk) {
-      if (chillWalkAudio.current) {
-        chillWalkAudio.current.currentTime = 0;
-        chillWalkAudio.current.play().catch(() => {});
-      }
-    } else {
-      if (stepOnBlockAudio.current) {
-        stepOnBlockAudio.current.currentTime = 0;
-        stepOnBlockAudio.current.play().catch(() => {});
+    // Play initial walk sound (only for cardinal movements, diagonal handles its own timing)
+    if (!diagonal) {
+      if (shouldChillWalk) {
+        if (chillWalkAudio.current) {
+          chillWalkAudio.current.currentTime = 0;
+          chillWalkAudio.current.play().catch(() => {});
+        }
+      } else {
+        if (stepOnBlockAudio.current) {
+          stepOnBlockAudio.current.currentTime = 0;
+          stepOnBlockAudio.current.play().catch(() => {});
+        }
       }
     }
   };
