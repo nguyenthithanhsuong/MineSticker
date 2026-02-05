@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Analytics } from "@vercel/analytics/react";
 import {
   Character,
   Face,
@@ -18,6 +17,8 @@ import {
   SCORCH_SPRITE_SHEET,
   PLACEFLAG_SPRITE_SHEET,
   CHEER_SPRITE_SHEET,
+  DIAGONAL_SPRITE_SHEET,
+  KEY_SPRITE_SHEET,
   TILE_COORDS,
   FACE_COORDS,
   NUMBER_COORDS,
@@ -33,7 +34,8 @@ import {
   KABOOM_COORDS,
   SCORCH_COORDS,
   CHEER_COORDS,
-  PLACEFLAG_COORDS
+  PLACEFLAG_COORDS,
+  DIAGONAL_COORDS
 } from "../../shared";
 
 interface GameState {
@@ -134,9 +136,27 @@ export default function App() {
   const [timer, setTimer] = useState(0);
   const [isFacePressed, setIsFacePressed] = useState(false);
   const [pressedArrows, setPressedArrows] = useState<Set<string>>(new Set());
+  const [pressedMovementKeys, setPressedMovementKeys] = useState<Set<string>>(new Set());
+  const pressedMovementKeysRef = useRef<Set<string>>(new Set());
   const [animationFrame, setAnimationFrame] = useState(0);
   const [lastDirection, setLastDirection] = useState<"Up" | "Down" | "Left" | "Right">("Down");
-  const [previousWalkDirection, setPreviousWalkDirection] = useState<"Up" | "Down" | "Left" | "Right" | null>(null);
+  
+  // Key bindings
+  const [keyBindings, setKeyBindings] = useState(() => {
+    const stored = localStorage.getItem("minestickerKeyBindings");
+    return stored ? JSON.parse(stored) : {
+      up: "w",
+      down: "s",
+      left: "a",
+      right: "d",
+      flagUp: "arrowup",
+      flagDown: "arrowdown",
+      flagLeft: "arrowleft",
+      flagRight: "arrowright"
+    };
+  });
+  const [isRebindingKey, setIsRebindingKey] = useState<string | null>(null);
+  const [diagonalDirection, setDiagonalDirection] = useState<"TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [walkFrameIndex, setWalkFrameIndex] = useState(0);
   const [isChillWalk, setIsChillWalk] = useState(false);
@@ -157,12 +177,50 @@ export default function App() {
   const scorchIdRef = useRef(0);
   const explosionsPlayedRef = useRef(false);
   const explosionTickRef = useRef(0);
-  const shouldMirrorWalkRef = useRef(false);
+  const [shouldMirrorWalk, setShouldMirrorWalk] = useState(false);
   const lastWasVerticalMirroredRef = useRef(false);
+  const lastVerticalDirectionRef = useRef<"Up" | "Down" | null>(null);
+  const isMovingRef = useRef(false);
+  const skipNextAutoSaveRef = useRef(false);
   const [placingFlagDirection, setPlacingFlagDirection] = useState<"Up" | "Down" | "Left" | "Right" | "UpLeft" | "UpRight" | "DownLeft" | "DownRight" | null>(null);
   const [placeFlagFrameIndex, setPlaceFlagFrameIndex] = useState(0);
   const [isRemovingFlag, setIsRemovingFlag] = useState(false);
-  const [animationSpeed, setAnimationSpeed] = useState(30);
+  const [animationSpeed, setAnimationSpeed] = useState(() => {
+    const stored = localStorage.getItem("minestickerAnimationSpeed");
+    return stored ? parseInt(stored) : 30;
+  });
+  const [soundVolume, setSoundVolume] = useState(() => {
+    const stored = localStorage.getItem("minestickerSoundVolume");
+    return stored ? parseInt(stored) : 70;
+  });
+  const [darkMode, setDarkMode] = useState(() => {
+    const stored = localStorage.getItem("minestickerDarkMode");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [isInstructionsCollapsed, setIsInstructionsCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerInstructionsCollapsed");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [isAnimationSpeedCollapsed, setIsAnimationSpeedCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerAnimationSpeedCollapsed");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [isSoundVolumeCollapsed, setIsSoundVolumeCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerSoundVolumeCollapsed");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [isKeyBindingsCollapsed, setIsKeyBindingsCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerKeyBindingsCollapsed");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [keyButtonScale, setKeyButtonScale] = useState(() => {
+    const stored = localStorage.getItem("minestickerKeyButtonScale");
+    return stored ? parseFloat(stored) : 0.5;
+  });
+  const [isKeyButtonScaleCollapsed, setIsKeyButtonScaleCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerKeyButtonScaleCollapsed");
+    return stored ? JSON.parse(stored) : false;
+  });
   const INTRO_FRAME_SEQUENCE = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const GRID_SIZE = 16; // Tile size in pixels
   const KABOOM_FRAME_SIZE = 270;
@@ -181,6 +239,132 @@ export default function App() {
     panic: 100, // 1600ms / 16 frames
     cheer: 100  // 400ms / 4 frames
   }), [animationSpeed]);
+
+  // Save animation speed to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerAnimationSpeed", animationSpeed.toString());
+  }, [animationSpeed]);
+
+  // Save sound volume to localStorage and apply to audio elements
+  useEffect(() => {
+    localStorage.setItem("minestickerSoundVolume", soundVolume.toString());
+    const volume = soundVolume / 100;
+    [flagPlaceAudio, kaboomAudio, chillWalkAudio, stepOnBlockAudio, whooshAudio].forEach(audio => {
+      if (audio.current) {
+        audio.current.volume = volume;
+      }
+    });
+  }, [soundVolume]);
+
+  // Save dark mode preference to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerDarkMode", JSON.stringify(darkMode));
+  }, [darkMode]);
+
+  // Save collapsed state for sections to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerInstructionsCollapsed", JSON.stringify(isInstructionsCollapsed));
+  }, [isInstructionsCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("minestickerAnimationSpeedCollapsed", JSON.stringify(isAnimationSpeedCollapsed));
+  }, [isAnimationSpeedCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("minestickerSoundVolumeCollapsed", JSON.stringify(isSoundVolumeCollapsed));
+  }, [isSoundVolumeCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("minestickerKeyBindingsCollapsed", JSON.stringify(isKeyBindingsCollapsed));
+  }, [isKeyBindingsCollapsed]);
+
+  // Save key button scale to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerKeyButtonScale", keyButtonScale.toString());
+  }, [keyButtonScale]);
+
+  // Save key button scale collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerKeyButtonScaleCollapsed", JSON.stringify(isKeyButtonScaleCollapsed));
+  }, [isKeyButtonScaleCollapsed]);
+
+  const saveGameState = (
+    matrix: Matrix<Tile>,
+    overrides?: {
+      gridSize?: { rows: number; cols: number };
+      mineCount?: number;
+      charPos?: { row: number; col: number };
+      status?: GameStatus;
+      timer?: number;
+      gameStarted?: boolean;
+      firstMove?: boolean;
+    }
+  ) => {
+    const gameState = {
+      gridSize: overrides?.gridSize ?? gridSize,
+      mineCount: overrides?.mineCount ?? mineCount,
+      charPos: overrides?.charPos ?? charPos,
+      status: overrides?.status ?? status,
+      timer: overrides?.timer ?? timer,
+      gameStarted: overrides?.gameStarted ?? gameStarted,
+      firstMove: overrides?.firstMove ?? firstMove,
+      matrixData: matrix.data.map(row =>
+        row.map(tile => ({
+          texture: tile.texture,
+          isMine: tile.isMine,
+          isOpen: tile.isOpen,
+          isFlagged: tile.isFlagged
+        }))
+      )
+    };
+    localStorage.setItem("minestickerGameState", JSON.stringify(gameState));
+  };
+
+  // Save game state to localStorage
+  useEffect(() => {
+    if (gameStarted) {
+      if (skipNextAutoSaveRef.current) {
+        skipNextAutoSaveRef.current = false;
+        return;
+      }
+      saveGameState(localMatrix);
+    }
+  }, [gridSize, mineCount, charPos, status, timer, gameStarted, localMatrix, firstMove]);
+
+  // Load game state from localStorage on mount
+  useEffect(() => {
+    const savedState = localStorage.getItem("minestickerGameState");
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState);
+        // Only restore if it was an active game
+        if (parsed.gameStarted && parsed.status === "playing") {
+          setGridSize(parsed.gridSize);
+          setMineCount(parsed.mineCount);
+          setCharPos(parsed.charPos);
+          setStatus(parsed.status);
+          setTimer(parsed.timer);
+          setGameStarted(parsed.gameStarted);
+          
+          // Reconstruct matrix
+          const matrix = new Matrix<Tile>(parsed.gridSize.rows, parsed.gridSize.cols, (r, c) => {
+            const tileData = parsed.matrixData[r][c];
+            return new Tile(tileData.texture, tileData.isMine, tileData.isOpen, tileData.isFlagged);
+          });
+          setLocalMatrix(matrix);
+
+          if (typeof parsed.firstMove === "boolean") {
+            setFirstMove(parsed.firstMove);
+          } else {
+            const anyOpen = parsed.matrixData?.some((row: any[]) => row.some((tile: any) => tile?.isOpen));
+            setFirstMove(!anyOpen);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load game state:", e);
+      }
+    }
+  }, []);
 
   // Timer effect
   useEffect(() => {
@@ -235,9 +419,11 @@ export default function App() {
     explosionIdRef.current += 1;
     setActiveExplosions([{ row: first.row, col: first.col, frameIndex: 0, scale, id: explosionIdRef.current }]);
     
-    // Play kaboom sound for first explosion - create new instance
-    const audio = new Audio("/kaboom.wav");
-    audio.play().catch(() => {});
+    // Play kaboom sound for first explosion
+    if (kaboomAudio.current) {
+      kaboomAudio.current.currentTime = 0;
+      kaboomAudio.current.play().catch(() => {});
+    }
   }, [status, localMatrix, gridSize, steppedMine]);
 
   // Character explosion after 1.5 seconds when status becomes lost
@@ -253,8 +439,10 @@ export default function App() {
       ]);
       
       // Play kaboom sound for character explosion
-      const audio = new Audio("/kaboom.wav");
-      audio.play().catch(() => {});
+      if (kaboomAudio.current) {
+        kaboomAudio.current.currentTime = 0;
+        kaboomAudio.current.play().catch(() => {});
+      }
     }, 1500);
 
     return () => clearTimeout(timeout);
@@ -298,9 +486,11 @@ export default function App() {
             { row: nextTarget.row, col: nextTarget.col, frameIndex: 0, scale, id: explosionIdRef.current }
           ]);
           
-          // Play kaboom sound for new explosion - create new instance
-          const audio = new Audio("/kaboom.wav");
-          audio.play().catch(() => {});
+          // Play kaboom sound for new explosion
+          if (kaboomAudio.current) {
+            kaboomAudio.current.currentTime = 0;
+            kaboomAudio.current.play().catch(() => {});
+          }
         }
       }
 
@@ -398,15 +588,33 @@ export default function App() {
         const nextFrame = prev + 1;
 
         // Play sound effects at specific frames
-        if (isChillWalk && nextFrame === 3) {
-          if (chillWalkAudio.current) {
-            chillWalkAudio.current.currentTime = 0;
-            chillWalkAudio.current.play().catch(() => {});
+        if (diagonalDirection !== null) {
+          // Diagonal movement: play at frame 5 only
+          if (nextFrame === 5) {
+            if (isChillWalk) {
+              if (chillWalkAudio.current) {
+                chillWalkAudio.current.currentTime = 0;
+                chillWalkAudio.current.play().catch(() => {});
+              }
+            } else {
+              if (stepOnBlockAudio.current) {
+                stepOnBlockAudio.current.currentTime = 0;
+                stepOnBlockAudio.current.play().catch(() => {});
+              }
+            }
           }
-        } else if (!isChillWalk && nextFrame === 6) {
-          if (chillWalkAudio.current) {
-            chillWalkAudio.current.currentTime = 0;
-            chillWalkAudio.current.play().catch(() => {});
+        } else if (diagonalDirection === null) {
+          // Cardinal movement only: original timing
+          if (isChillWalk && nextFrame === 3) {
+            if (chillWalkAudio.current) {
+              chillWalkAudio.current.currentTime = 0;
+              chillWalkAudio.current.play().catch(() => {});
+            }
+          } else if (!isChillWalk && nextFrame === 6) {
+            if (chillWalkAudio.current) {
+              chillWalkAudio.current.currentTime = 0;
+              chillWalkAudio.current.play().catch(() => {});
+            }
           }
         }
 
@@ -417,7 +625,7 @@ export default function App() {
           }
         }
 
-        const totalFrames = isChillWalk ? 6 : 11;
+        const totalFrames = isChillWalk && diagonalDirection === null ? 6 : 11;
         // Complete animation at final frame
         if (nextFrame >= totalFrames) {
           // Update character position after animation completes
@@ -425,6 +633,7 @@ export default function App() {
             setCharPos(pendingCharPos);
             setPendingCharPos(null);
           }
+          isMovingRef.current = false;
           setIsMoving(false);
           return 0;
         }
@@ -433,7 +642,7 @@ export default function App() {
     }, animationIntervals.walk);
     
     return () => clearInterval(walkIntervalId);
-  }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk]);
+  }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk, diagonalDirection]);
 
   // Place flag animation effect
   useEffect(() => {
@@ -528,14 +737,36 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      
+      // Always prevent default for arrow keys to stop page scrolling
+      if (key.startsWith("arrow")) {
+        e.preventDefault();
+      }
+      
+      // Allow restart with Enter key anytime during the game
+      if (key === "enter") {
+        if (gameStarted) {
+          // Restart current game
+          setDifficulty(gridSize.rows, gridSize.cols, mineCount);
+        } else if (status === "playing") {
+          // Randomly pick a starter tile if game hasn't started
+          const randomRow = Math.floor(Math.random() * gridSize.rows);
+          const randomCol = Math.floor(Math.random() * gridSize.cols);
+          toggleFlag(randomRow, randomCol);
+        }
+        return;
+      }
+      
+      if (isRebindingKey) return; // Disable game controls while rebinding
       if (!gameStarted) return; // Block input before game starts
       if (status !== "playing") return;
       if (isMoving || placingFlagDirection !== null || isIntro) return; // Block input during animations
-      
-      const key = e.key.toLowerCase();
 
-      if (key.startsWith("arrow")) {
-        e.preventDefault();
+      // Check if key is a flag key
+      const isFlagKey = [keyBindings.flagUp, keyBindings.flagDown, keyBindings.flagLeft, keyBindings.flagRight].includes(key);
+      
+      if (isFlagKey) {
         setPressedArrows((prev) => {
           const next = new Set(prev);
           next.add(key);
@@ -544,25 +775,96 @@ export default function App() {
         return;
       }
 
-      if (key === "w") moveCharacter(-1, 0);
-      if (key === "s") moveCharacter(1, 0);
-      if (key === "a") moveCharacter(0, -1);
-      if (key === "d") moveCharacter(0, 1);
+      // Check if key is a movement key - add to set for diagonal tracking
+      const isMovementKey = [keyBindings.up, keyBindings.down, keyBindings.left, keyBindings.right].includes(key);
+      if (isMovementKey) {
+        const next = new Set(pressedMovementKeysRef.current);
+        next.add(key);
+        pressedMovementKeysRef.current = next;
+        setPressedMovementKeys(next);
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isRebindingKey) return; // Disable game controls while rebinding
       if (!gameStarted) return; // Block input before game starts
       if (isIntro) return;
       const key = e.key.toLowerCase();
-      if (!key.startsWith("arrow")) return;
+      
+      // Handle flag key release
+      const isFlagKey = [keyBindings.flagUp, keyBindings.flagDown, keyBindings.flagLeft, keyBindings.flagRight].includes(key);
+      if (isFlagKey) {
+        setPressedArrows((prev) => {
+          const current = new Set(prev);
+          // Use current (including released key) to determine direction
+          const up = current.has(keyBindings.flagUp);
+          const down = current.has(keyBindings.flagDown);
+          const left = current.has(keyBindings.flagLeft);
+          const right = current.has(keyBindings.flagRight);
 
-      setPressedArrows((prev) => {
-        const current = new Set(prev);
+          let dr = 0;
+          let dc = 0;
+          let isDiagonal = false;
+          let isSingle = false;
+
+          if (up && right) {
+            dr = -1;
+            dc = 1;
+            isDiagonal = true;
+          } else if (up && left) {
+            dr = -1;
+            dc = -1;
+            isDiagonal = true;
+          } else if (down && right) {
+            dr = 1;
+            dc = 1;
+            isDiagonal = true;
+          } else if (down && left) {
+            dr = 1;
+            dc = -1;
+            isDiagonal = true;
+          } else if (up) {
+            dr = -1;
+            dc = 0;
+            isSingle = current.size === 1;
+          } else if (down) {
+            dr = 1;
+            dc = 0;
+            isSingle = current.size === 1;
+          } else if (left) {
+            dr = 0;
+            dc = -1;
+            isSingle = current.size === 1;
+          } else if (right) {
+            dr = 0;
+            dc = 1;
+            isSingle = current.size === 1;
+          }
+
+          if (isDiagonal && (dr !== 0 || dc !== 0)) {
+            toggleFlagAt(charPos.row + dr, charPos.col + dc);
+            return new Set();
+          }
+
+          if (isSingle && (dr !== 0 || dc !== 0)) {
+            toggleFlagAt(charPos.row + dr, charPos.col + dc);
+          }
+
+          current.delete(key);
+          return current;
+        });
+        return;
+      }
+
+      // Handle movement key release
+      const isMovementKey = [keyBindings.up, keyBindings.down, keyBindings.left, keyBindings.right].includes(key);
+      if (isMovementKey) {
+        const current = new Set(pressedMovementKeysRef.current);
         // Use current (including released key) to determine direction
-        const up = current.has("arrowup");
-        const down = current.has("arrowdown");
-        const left = current.has("arrowleft");
-        const right = current.has("arrowright");
+        const up = current.has(keyBindings.up);
+        const down = current.has(keyBindings.down);
+        const left = current.has(keyBindings.left);
+        const right = current.has(keyBindings.right);
 
         let dr = 0;
         let dc = 0;
@@ -604,17 +906,23 @@ export default function App() {
         }
 
         if (isDiagonal && (dr !== 0 || dc !== 0)) {
-          toggleFlagAt(charPos.row + dr, charPos.col + dc);
-          return new Set();
+          moveCharacter(dr, dc, 
+            dc === 1 ? (dr === -1 ? "TopRight" : "BottomRight") : 
+            (dr === -1 ? "TopLeft" : "BottomLeft")
+          );
+          pressedMovementKeysRef.current = new Set();
+          setPressedMovementKeys(new Set());
+          return;
         }
 
         if (isSingle && (dr !== 0 || dc !== 0)) {
-          toggleFlagAt(charPos.row + dr, charPos.col + dc);
+          moveCharacter(dr, dc, null);
         }
 
         current.delete(key);
-        return current;
-      });
+        pressedMovementKeysRef.current = current;
+        setPressedMovementKeys(current);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -623,13 +931,53 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, placingFlagDirection, isIntro]);
+  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, placingFlagDirection, isIntro, keyBindings, isRebindingKey, mineCount]);
+
+  // Handle key rebinding
+  useEffect(() => {
+    if (!isRebindingKey) return;
+
+    const handleRebindKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      const newKey = e.key.toLowerCase();
+      
+      // Ignore modifier keys
+      if (["control", "alt", "shift", "meta"].includes(newKey)) return;
+      
+      // Update the key binding and remove any duplicate keys
+      setKeyBindings((prev: any) => {
+        const updated = { ...prev };
+        
+        // First, find and clear any existing binding with this key
+        for (const [bindingKey, bindingValue] of Object.entries(updated)) {
+          if (bindingValue === newKey && bindingKey !== isRebindingKey) {
+            updated[bindingKey] = ""; // Clear the old binding
+          }
+        }
+        
+        // Then set the new binding
+        updated[isRebindingKey] = newKey;
+        
+        localStorage.setItem("minestickerKeyBindings", JSON.stringify(updated));
+        return updated;
+      });
+      
+      setIsRebindingKey(null);
+    };
+
+    window.addEventListener("keydown", handleRebindKey);
+    return () => {
+      window.removeEventListener("keydown", handleRebindKey);
+    };
+  }, [isRebindingKey]);
 
   // Tile reveal now happens in intro animation at frame 6
   // No need for auto-reveal on game start
 
   const clearAllAnimations = () => {
     setIsMoving(false);
+    isMovingRef.current = false;
+    skipNextAutoSaveRef.current = false;
     setWalkFrameIndex(0);
     setIsChillWalk(false);
     setPendingCharPos(null);
@@ -649,11 +997,12 @@ export default function App() {
     setActiveExplosions([]);
     setScorchMarks([]);
     explosionQueueRef.current = [];
+    pressedMovementKeysRef.current = new Set();
     explosionsPlayedRef.current = false;
     explosionTickRef.current = 0;
     scorchIdRef.current = 0;
-    setPreviousWalkDirection(null);
-    shouldMirrorWalkRef.current = false;
+    lastVerticalDirectionRef.current = null;
+    setShouldMirrorWalk(false);
     lastWasVerticalMirroredRef.current = false;
   };
 
@@ -667,6 +1016,45 @@ export default function App() {
     setFirstMove(true);
     setGameStarted(false);
     setTimer(0);
+    // Clear saved game state when starting new game
+    localStorage.removeItem("minestickerGameState");
+  };
+
+  const hardReset = () => {
+    // Clear all localStorage items
+    localStorage.removeItem("minestickerGameState");
+    localStorage.removeItem("minestickerKeyBindings");
+    localStorage.removeItem("minestickerAnimationSpeed");
+    localStorage.removeItem("minestickerSoundVolume");
+    localStorage.removeItem("minestickerDarkMode");
+    localStorage.removeItem("minestickerInstructionsCollapsed");
+    localStorage.removeItem("minestickerAnimationSpeedCollapsed");
+    localStorage.removeItem("minestickerSoundVolumeCollapsed");
+    localStorage.removeItem("minestickerKeyBindingsCollapsed");
+    localStorage.removeItem("minestickerKeyButtonScale");
+    localStorage.removeItem("minestickerKeyButtonScaleCollapsed");
+    
+    // Reset all state to defaults
+    setKeyBindings({
+      up: "w",
+      down: "s",
+      left: "a",
+      right: "d",
+      flagUp: "arrowup",
+      flagDown: "arrowdown",
+      flagLeft: "arrowleft",
+      flagRight: "arrowright"
+    });
+    setAnimationSpeed(30);
+    setSoundVolume(70);
+    setDarkMode(false);
+    setIsInstructionsCollapsed(false);
+    setIsAnimationSpeedCollapsed(true);
+    setIsSoundVolumeCollapsed(true);
+    setIsKeyBindingsCollapsed(true);
+    setIsKeyButtonScaleCollapsed(true);
+    setKeyButtonScale(0.5);
+    setDifficulty(9, 9, 10);
   };
 
   const getIdleFrame = useMemo(() => {
@@ -689,6 +1077,17 @@ export default function App() {
     const prefix = directionMap[lastDirection] || "walkDown";
     return WALK_COORDS[`${prefix}${walkFrameIndex}`];
   }, [lastDirection, walkFrameIndex]);
+
+  const getDiagonalWalkFrame = useMemo(() => {
+    const directionMap: Record<string, string> = {
+      "TopLeft": "diagonalTopLeft",
+      "TopRight": "diagonalTopRight",
+      "BottomLeft": "diagonalBottomLeft",
+      "BottomRight": "diagonalBottomRight"
+    };
+    const prefix = directionMap[diagonalDirection || "TopLeft"] || "diagonalTopLeft";
+    return DIAGONAL_COORDS[`${prefix}${walkFrameIndex}`];
+  }, [diagonalDirection, walkFrameIndex]);
 
   const getChillWalkFrame = useMemo(() => {
     const directionMap: Record<string, string> = {
@@ -743,6 +1142,11 @@ export default function App() {
         spriteSheet: PLACEFLAG_SPRITE_SHEET,
         coords: getPlaceFlagFrame
       };
+    } else if (diagonalDirection !== null && isMoving) {
+      return {
+        spriteSheet: DIAGONAL_SPRITE_SHEET,
+        coords: getDiagonalWalkFrame
+      };
     } else if (isMoving) {
       return {
         spriteSheet: isChillWalk ? CHILLWALK_SPRITE_SHEET : WALK_SPRITE_SHEET,
@@ -754,7 +1158,7 @@ export default function App() {
         coords: getIdleFrame
       };
     }
-  }, [isIntro, isDead, isPanic, placingFlagDirection, isMoving, isChillWalk, getIntroFrame, getPanicFrame, getPlaceFlagFrame, getChillWalkFrame, getWalkFrame, getIdleFrame]);
+  }, [isIntro, isDead, isPanic, placingFlagDirection, diagonalDirection, isMoving, isChillWalk, getIntroFrame, getPanicFrame, getPlaceFlagFrame, getDiagonalWalkFrame, getChillWalkFrame, getWalkFrame, getIdleFrame]);
 
   const renderThreeDigitNumber = (value: number) => {
     const digits = Math.min(Math.max(value, 0), 999).toString().padStart(3, '0').split('');
@@ -788,8 +1192,9 @@ export default function App() {
     return FACE_COORDS.face1;
   }, [isFacePressed, status]);
 
-  const moveCharacter = (dr: number, dc: number) => {
+  const moveCharacter = (dr: number, dc: number, diagonal: "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null = null) => {
     if (status !== "playing" || isIntro) return;
+    if (isMovingRef.current) return;
     
     // Calculate new position
     const newRow = charPos.row + dr;
@@ -803,6 +1208,9 @@ export default function App() {
     const targetTile = localMatrix.get(newRow, newCol);
     const shouldChillWalk = !!targetTile && (targetTile.isOpen || targetTile.isFlagged);
     
+    // Set diagonal direction
+    setDiagonalDirection(diagonal);
+    
     // Determine new direction
     let newDirection: "Up" | "Down" | "Left" | "Right" = "Down";
     if (dr === -1) newDirection = "Up";
@@ -810,45 +1218,60 @@ export default function App() {
     else if (dc === -1) newDirection = "Left";
     else if (dc === 1) newDirection = "Right";
     
-    // Check if this is the exact same direction as the previous move (for alternating mirror)
+    // Check if this is the exact same vertical direction as the previous vertical move (for alternating mirror)
     // Only apply mirroring to Up and Down directions
     const isVerticalDirection = newDirection === "Up" || newDirection === "Down";
-    const isSameDirectionAsLast = previousWalkDirection === newDirection;
     
-    // Determine if we should mirror: toggle on each repeat of vertical direction
-    if (isVerticalDirection && isSameDirectionAsLast) {
-      // Alternate: if last time was mirrored, don't mirror this time, and vice versa
-      shouldMirrorWalkRef.current = !lastWasVerticalMirroredRef.current;
-      lastWasVerticalMirroredRef.current = shouldMirrorWalkRef.current;
-    } else {
-      // Not a repeat of vertical, or moving horizontally: no mirror
-      shouldMirrorWalkRef.current = false;
-      if (isVerticalDirection) {
-        lastWasVerticalMirroredRef.current = false; // Reset toggle when changing direction
+    if (!diagonal && isVerticalDirection) {
+      const verticalDirection = newDirection === "Up" || newDirection === "Down" ? newDirection : null;
+      const isSameVerticalAsLast = lastVerticalDirectionRef.current === verticalDirection;
+      if (isSameVerticalAsLast) {
+        // Alternate: if last time was mirrored, don't mirror this time, and vice versa
+        const nextMirror = !lastWasVerticalMirroredRef.current;
+        setShouldMirrorWalk(nextMirror);
+        lastWasVerticalMirroredRef.current = nextMirror;
+      } else {
+        // First move in this vertical direction: no mirror
+        setShouldMirrorWalk(false);
+        lastWasVerticalMirroredRef.current = false;
       }
+      lastVerticalDirectionRef.current = verticalDirection;
+    } else {
+      // Not vertical or moving diagonally: no mirror
+      setShouldMirrorWalk(false);
+      lastWasVerticalMirroredRef.current = false;
+      lastVerticalDirectionRef.current = null;
     }
     
     setLastDirection(newDirection);
-    setPreviousWalkDirection(newDirection);
     
     setWalkFrameIndex(0);
+    isMovingRef.current = true;
     setIsMoving(true);
     setIsChillWalk(shouldChillWalk);
     setPendingCharPos({ row: newRow, col: newCol });
     
-    // Play initial walk sound
-    if (shouldChillWalk) {
-      if (chillWalkAudio.current) {
-        chillWalkAudio.current.currentTime = 0;
-        chillWalkAudio.current.play().catch(() => {});
-      }
-    } else {
-      if (stepOnBlockAudio.current) {
-        stepOnBlockAudio.current.currentTime = 0;
-        stepOnBlockAudio.current.play().catch(() => {});
+    // Play initial walk sound (only for cardinal movements, diagonal handles its own timing)
+    if (!diagonal) {
+      if (shouldChillWalk) {
+        if (chillWalkAudio.current) {
+          chillWalkAudio.current.currentTime = 0;
+          chillWalkAudio.current.play().catch(() => {});
+        }
+      } else {
+        if (stepOnBlockAudio.current) {
+          stepOnBlockAudio.current.currentTime = 0;
+          stepOnBlockAudio.current.play().catch(() => {});
+        }
       }
     }
   };
+
+  const KEY_BUTTON_SCALE = keyButtonScale;
+  const KEY_BUTTON_BASE = 50;
+  const KEY_BUTTON_SIZE = Math.round(KEY_BUTTON_BASE * KEY_BUTTON_SCALE);
+  const KEY_SPRITE_SHEET_WIDTH = 400;
+  const KEY_SPRITE_SHEET_HEIGHT = 100;
 
   const renderKeyButton = (
     coords: { x1: number; y1: number; x2: number; y2: number },
@@ -857,6 +1280,8 @@ export default function App() {
   ) => {
     const width = coords.x2 - coords.x1 + 1;
     const height = coords.y2 - coords.y1 + 1;
+    const scaledWidth = Math.round(width * KEY_BUTTON_SCALE);
+    const scaledHeight = Math.round(height * KEY_BUTTON_SCALE);
     return (
       <button
         type="button"
@@ -867,14 +1292,15 @@ export default function App() {
         }}
         aria-label={ariaLabel}
         style={{
-          width,
-          height,
+          width: scaledWidth,
+          height: scaledHeight,
           padding: 0,
           border: "none",
           backgroundColor: "transparent",
-          backgroundImage: `url(${SPRITE_SHEET})`,
-          backgroundPosition: `-${coords.x1}px -${coords.y1}px`,
-          backgroundSize: "auto",
+          backgroundImage: `url(${KEY_SPRITE_SHEET})`,
+          backgroundPosition: `-${coords.x1 * KEY_BUTTON_SCALE}px -${coords.y1 * KEY_BUTTON_SCALE}px`,
+          backgroundSize: `${KEY_SPRITE_SHEET_WIDTH * KEY_BUTTON_SCALE}px ${KEY_SPRITE_SHEET_HEIGHT * KEY_BUTTON_SCALE}px`,
+          backgroundRepeat: "no-repeat",
           cursor: "pointer"
         }}
       />
@@ -933,6 +1359,14 @@ export default function App() {
       setLocalMatrix((prev) => {
         const next = cloneMatrix(prev);
         clearStarterArea(next, row, col);
+        skipNextAutoSaveRef.current = true;
+        saveGameState(next, {
+          charPos: { row, col },
+          status: "playing",
+          timer: 0,
+          gameStarted: true,
+          firstMove: true
+        });
         return next;
       });
       
@@ -1088,7 +1522,14 @@ export default function App() {
   };
 
   return (
-    <div style={{ padding: 12, fontFamily: "sans-serif" }}>
+    <div style={{ 
+      padding: 12, 
+      fontFamily: "sans-serif",
+      backgroundColor: darkMode ? "#1A1A1E" : "#ffffff",
+      color: darkMode ? "#FFFFFF" : "#000000",
+      minHeight: "100vh",
+      transition: "background-color 0.3s ease, color 0.3s ease"
+    }}>
       {/* <h1>MineSticker</h1>
       <p>React + NestJS starter with shared game classes.</p>
 
@@ -1100,19 +1541,70 @@ export default function App() {
       </section> */}
 
       <section style={{ marginTop: 16, overflow: "visible" }}>
-        <h2>Minesweeper (But with The Dark Lord)</h2>
-        <div className="p-4 bg-gray-900 text-white rounded-lg">
-      <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-        Inspired by Animator vs Animation 3 - Alan Becker</p>
+        <div
+          onClick={() => setIsInstructionsCollapsed(!isInstructionsCollapsed)}
+          style={{
+            cursor: "pointer",
+            userSelect: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: isInstructionsCollapsed ? 0 : 12
+          }}
+        >
+          <span style={{ fontSize: 18 }}>
+            {isInstructionsCollapsed ? "▶" : "▼"}
+          </span>
+          <h2 style={{ margin: 0, display: "inline" }}>Minesweeper (But with The Dark Lord)</h2>
+        </div>
+        <div
+          style={{
+            maxHeight: isInstructionsCollapsed ? 0 : "1000px",
+            overflow: "hidden",
+            transition: "max-height 0.3s ease-in-out",
+            marginBottom: isInstructionsCollapsed ? 0 : 12
+          }}
+        >
+          <div className="p-4 bg-gray-900 text-white rounded-lg">
         <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-        Please select any tile to start the game!</p>
-        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-        Use WASD to move around, and press arrow keys to place flags (two arrow key can be pressed together for diagonal flags)!</p>
-        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-         Use the on-screen WASD and arrow keys if you're on a touch device!</p>
-      
-    </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          Inspired by Animator vs Animation 3 - Alan Becker</p>
+          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+          Don't know how to play Minesweeper?&nbsp;
+                <a href="https://www.spriters-resource.com/pc_computer/minesweeper/asset/19849/" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
+                  Here's how!
+                </a></p>
+          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+          Please select any tile to start the game!</p>
+          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+          Use WASD to move around, and press arrow keys to place flags (two arrow key can be pressed together for diagonal flags)!</p>
+          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+           Use the on-screen WASD and arrow keys if you're on a touch device!</p>
+           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+           To Restart the game, press the face button above the mine counter or Enter! You can randomize a start with Enter!</p>
+           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+           Encountered bugs? Hard Reset the game:&nbsp;  
+        <button 
+              type="button" 
+              onClick={() => {
+                if (window.confirm("This will reset ALL data including game progress, settings, and keybindings. Continue?")) {
+                  hardReset();
+                }
+              }}
+              style={{
+                backgroundColor: "#ff4444",
+                color: "white",
+                fontWeight: "bold",
+                border: "2px solid #cc0000",
+                padding: "4px 12px",
+                cursor: "pointer",
+                borderRadius: "4px"
+              }}
+            >
+              Reset
+            </button></p>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" onClick={() => setDifficulty(9, 9, 10)}>
             Easy 9x9
           </button>
@@ -1121,6 +1613,21 @@ export default function App() {
           </button>
           <button type="button" onClick={() => setDifficulty(16, 30, 99)}>
             Hard 30x16
+          </button>
+          <button
+            type="button"
+            onClick={() => setDarkMode(!darkMode)}
+            style={{
+              backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+              color: darkMode ? "#FFFFFF" : "#000000",
+              border: darkMode ? "2px solid #666666" : "2px solid #999999",
+              padding: "4px 12px",
+              cursor: "pointer",
+              borderRadius: "4px",
+              fontWeight: "bold"
+            }}
+          >
+            {darkMode ? "Dark" : "Light"}
           </button>
         </div>
         
@@ -1137,7 +1644,7 @@ export default function App() {
         }}>
           {/* Counter displays */}
           <div style={{ 
-            border: "8px solid #C6C6C6",
+            border: `8px solid ${darkMode ? "#C6C6C6" : "#C6C6C6"}`,
             width: "fit-content"
           }}>
             <div style={{
@@ -1145,10 +1652,10 @@ export default function App() {
               justifyContent: "space-between",
               alignItems: "center",
               width: gridSize.cols * 16 - 8,
-              background: "#C6C6C6",
+              background: darkMode ? "#C6C6C6" : "#C6C6C6",
               border: "4px solid #808080",
-              borderRightColor: "#ffffff",
-              borderBottomColor: "#ffffff",
+              borderRightColor: darkMode ? "#ffffff" : "#ffffff",
+              borderBottomColor: darkMode ? "#ffffff" : "#ffffff",
               padding: "4px 4px",
               boxSizing: "content-box",
               position: "relative"
@@ -1216,6 +1723,14 @@ export default function App() {
                     setLocalMatrix((prev) => {
                       const next = cloneMatrix(prev);
                       clearStarterArea(next, row, col);
+                      skipNextAutoSaveRef.current = true;
+                      saveGameState(next, {
+                        charPos: { row, col },
+                        status: "playing",
+                        timer: 0,
+                        gameStarted: true,
+                        firstMove: true
+                      });
                       return next;
                     });
                     
@@ -1324,7 +1839,7 @@ export default function App() {
                 backgroundPosition: `-${getCurrentCharacterSprite.coords.x1}px -${getCurrentCharacterSprite.coords.y1}px`,
                 backgroundSize: "auto",
                 pointerEvents: "none",
-                transform: isMoving && shouldMirrorWalkRef.current ? "scaleX(-1)" : "none",
+                transform: isMoving && shouldMirrorWalk ? "scaleX(-1)" : "none",
                 transformOrigin: "center",
                 zIndex: 10
               }}
@@ -1363,19 +1878,19 @@ export default function App() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 24px)",
+                gridTemplateColumns: `repeat(3, ${KEY_BUTTON_SIZE}px)`,
                 gap: 4
               }}
             >
-              <div style={{ width: 24, height: 24 }} />
+              {renderKeyButton(KEY_COORDS.arrowUpLeft, () => moveCharacter(-1, -1, "TopLeft"), "Move up-left")}
               {renderKeyButton(KEY_COORDS.keyW, () => moveCharacter(-1, 0), "Move up")}
-              <div style={{ width: 24, height: 24 }} />
+              {renderKeyButton(KEY_COORDS.arrowUpRight, () => moveCharacter(-1, 1, "TopRight"), "Move up-right")}
               {renderKeyButton(KEY_COORDS.keyA, () => moveCharacter(0, -1), "Move left")}
-              <div style={{ width: 24, height: 24 }} />
+              <div style={{ width: KEY_BUTTON_SIZE, height: KEY_BUTTON_SIZE }} />
               {renderKeyButton(KEY_COORDS.keyD, () => moveCharacter(0, 1), "Move right")}
-              <div style={{ width: 24, height: 24 }} />
+              {renderKeyButton(KEY_COORDS.arrowDownLeft, () => moveCharacter(1, -1, "BottomLeft"), "Move down-left")}
               {renderKeyButton(KEY_COORDS.keyS, () => moveCharacter(1, 0), "Move down")}
-              <div style={{ width: 24, height: 24 }} />
+              {renderKeyButton(KEY_COORDS.arrowDownRight, () => moveCharacter(1, 1, "BottomRight"), "Move down-right")}
             </div>
           </div>
 
@@ -1384,7 +1899,7 @@ export default function App() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 24px)",
+                gridTemplateColumns: `repeat(3, ${KEY_BUTTON_SIZE}px)`,
                 gap: 4
               }}
             >
@@ -1392,7 +1907,7 @@ export default function App() {
               {renderKeyButton(KEY_COORDS.arrowUp, () => toggleFlagAt(charPos.row - 1, charPos.col), "Flag up")}
               {renderKeyButton(KEY_COORDS.arrowUpRight, () => toggleFlagAt(charPos.row - 1, charPos.col + 1), "Flag up-right")}
               {renderKeyButton(KEY_COORDS.arrowLeft, () => toggleFlagAt(charPos.row, charPos.col - 1), "Flag left")}
-              <div style={{ width: 24, height: 24 }} />
+              <div style={{ width: KEY_BUTTON_SIZE, height: KEY_BUTTON_SIZE }} />
               {renderKeyButton(KEY_COORDS.arrowRight, () => toggleFlagAt(charPos.row, charPos.col + 1), "Flag right")}
               {renderKeyButton(KEY_COORDS.arrowDownLeft, () => toggleFlagAt(charPos.row + 1, charPos.col - 1), "Flag down-left")}
               {renderKeyButton(KEY_COORDS.arrowDown, () => toggleFlagAt(charPos.row + 1, charPos.col), "Flag down")}
@@ -1402,127 +1917,338 @@ export default function App() {
         </div>
 
         <div style={{ marginTop: 24, maxWidth: 300 }}>
-          <label style={{ display: "block", marginBottom: 8, fontSize: 12 }}>
-            Animation Speed: {animationSpeed}
-          </label>
-          <input
-            type="range"
-            min="1"
-            max="60"
-            value={animationSpeed}
-            onChange={(e) => setAnimationSpeed(parseInt(e.target.value))}
+          <div
+            onClick={() => setIsAnimationSpeedCollapsed(!isAnimationSpeedCollapsed)}
             style={{
-              width: "100%",
-              cursor: "pointer"
-            }}
-          />
-          <div style={{ fontSize: 10, color: "#666", marginTop: 4, marginBottom: 8 }}>
-            1 = Slow, 60 = Fast (Default: 30)
-          </div>
-          <button
-            onClick={() => setAnimationSpeed(30)}
-            style={{
-              padding: "4px 12px",
-              fontSize: 12,
               cursor: "pointer",
-              backgroundColor: "#f0f0f0",
-              border: "1px solid #999",
-              borderRadius: 2
+              userSelect: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: isAnimationSpeedCollapsed ? 0 : 12
             }}
           >
-            Reset to Default
-          </button>
-          <div style={{ fontSize: 11, color: "#555", marginTop: 12, lineHeight: 1.6 }}>
-            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
-            <div>TDL's texture were made by ScottAndersinn</div>
-            <div>Explosion Animation and Sound Effect were taken directly from AvA3!</div>
+            <span style={{ fontSize: 16 }}>
+              {isAnimationSpeedCollapsed ? "▶" : "▼"}
+            </span>
+            <label style={{ margin: 0, fontSize: 12, color: darkMode ? "#FFFFFF" : "#000000", fontWeight: "bold" }}>
+              Animation Speed: {animationSpeed}
+            </label>
+          </div>
+          <div
+            style={{
+              maxHeight: isAnimationSpeedCollapsed ? 0 : "500px",
+              overflow: "hidden",
+              transition: "max-height 0.3s ease-in-out",
+              marginBottom: isAnimationSpeedCollapsed ? 0 : 16
+            }}
+          >
+            <input
+              type="range"
+              min="1"
+              max="60"
+              value={animationSpeed}
+              onChange={(e) => setAnimationSpeed(parseInt(e.target.value))}
+              style={{
+                width: "100%",
+                cursor: "pointer",
+                marginBottom: 8
+              }}
+            />
+            <div style={{ fontSize: 10, color: darkMode ? "#999999" : "#666", marginTop: 4, marginBottom: 8 }}>
+              1 = Slow, 60 = Fast (Default: 30)
+            </div>
+            <button
+              onClick={() => setAnimationSpeed(30)}
+              style={{
+                padding: "4px 12px",
+                fontSize: 12,
+                cursor: "pointer",
+                backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+                color: darkMode ? "#FFFFFF" : "#000000",
+                border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                borderRadius: 2
+              }}
+            >
+              Reset to Default
+            </button>
+          </div>
+
+          <div
+            onClick={() => setIsSoundVolumeCollapsed(!isSoundVolumeCollapsed)}
+            style={{
+              cursor: "pointer",
+              userSelect: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 16,
+              marginBottom: isSoundVolumeCollapsed ? 0 : 12
+            }}
+          >
+            <span style={{ fontSize: 16 }}>
+              {isSoundVolumeCollapsed ? "▶" : "▼"}
+            </span>
+            <label style={{ margin: 0, fontSize: 12, color: darkMode ? "#FFFFFF" : "#000000", fontWeight: "bold" }}>
+              Sound Volume: {soundVolume}%
+            </label>
+          </div>
+          <div
+            style={{
+              maxHeight: isSoundVolumeCollapsed ? 0 : "500px",
+              overflow: "hidden",
+              transition: "max-height 0.3s ease-in-out",
+              marginBottom: isSoundVolumeCollapsed ? 0 : 16
+            }}
+          >
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={soundVolume}
+              onChange={(e) => setSoundVolume(parseInt(e.target.value))}
+              style={{
+                width: "100%",
+                cursor: "pointer",
+                marginBottom: 8
+              }}
+            />
+            <div style={{ fontSize: 10, color: darkMode ? "#999999" : "#666", marginTop: 4, marginBottom: 8 }}>
+              0 = Mute, 100 = Max (Default: 70)
+            </div>
+            <button
+              onClick={() => setSoundVolume(70)}
+              style={{
+                padding: "4px 12px",
+                fontSize: 12,
+                cursor: "pointer",
+                backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+                color: darkMode ? "#FFFFFF" : "#000000",
+                border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                borderRadius: 2
+              }}
+            >
+              Reset to Default
+            </button>
+          </div>
+        </div>
+<div style={{ marginTop: 24, maxWidth: 300 }}>
+          <div
+            onClick={() => setIsKeyButtonScaleCollapsed(!isKeyButtonScaleCollapsed)}
+            style={{
+              cursor: "pointer",
+              userSelect: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: isKeyButtonScaleCollapsed ? 0 : 12
+            }}
+          >
+            <span style={{ fontSize: 16 }}>
+              {isKeyButtonScaleCollapsed ? "▶" : "▼"}
+            </span>
+            <label style={{ margin: 0, fontSize: 12, color: darkMode ? "#FFFFFF" : "#000000", fontWeight: "bold" }}>
+              Control Size: {(keyButtonScale * 100).toFixed(0)}%
+            </label>
+          </div>
+          <div
+            style={{
+              maxHeight: isKeyButtonScaleCollapsed ? 0 : "500px",
+              overflow: "hidden",
+              transition: "max-height 0.3s ease-in-out",
+              marginBottom: isKeyButtonScaleCollapsed ? 0 : 16
+            }}
+          >
+            <input
+              type="range"
+              min="0.25"
+              max="2"
+              step="0.05"
+              value={keyButtonScale}
+              onChange={(e) => setKeyButtonScale(parseFloat(e.target.value))}
+              style={{
+                width: "100%",
+                cursor: "pointer",
+                marginBottom: 8
+              }}
+            />
+            <div style={{ fontSize: 10, color: darkMode ? "#999999" : "#666", marginTop: 4, marginBottom: 8 }}>
+              0.25x = Smallest, 2x = Largest (Default: 0.5x)
+            </div>
+            <button
+              onClick={() => setKeyButtonScale(0.5)}
+              style={{
+                padding: "4px 12px",
+                fontSize: 12,
+                cursor: "pointer",
+                backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+                color: darkMode ? "#FFFFFF" : "#000000",
+                border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                borderRadius: 2
+              }}
+            >
+              Reset to Default
+            </button>
+          </div>
+        </div>
+        <div style={{ marginTop: 24, maxWidth: 400 }}>
+          <div
+            onClick={() => setIsKeyBindingsCollapsed(!isKeyBindingsCollapsed)}
+            style={{
+              cursor: "pointer",
+              userSelect: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: isKeyBindingsCollapsed ? 0 : 12
+            }}
+          >
+            <span style={{ fontSize: 16 }}>
+              {isKeyBindingsCollapsed ? "▶" : "▼"}
+            </span>
+            <label style={{ margin: 0, fontSize: 12, fontWeight: "bold", color: darkMode ? "#FFFFFF" : "#000000" }}>
+              Key Bindings
+            </label>
+          </div>
+          
+          <div
+            style={{
+              maxHeight: isKeyBindingsCollapsed ? 0 : "2000px",
+              overflow: "hidden",
+              transition: "max-height 0.3s ease-in-out",
+              marginBottom: isKeyBindingsCollapsed ? 0 : 12
+            }}
+          >
+            <div style={{ fontSize: 11, color: darkMode ? "#999999" : "#666", marginBottom: 12, lineHeight: 1.5 }}>
+              Click on any key binding below to rebind it to a different key.
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
+              {/* Movement Keys */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Movement (WASD)</div>
+                {[
+                  { label: "Move Up", key: "up", display: keyBindings.up.toUpperCase() },
+                  { label: "Move Left", key: "left", display: keyBindings.left.toUpperCase() },
+                  { label: "Move Down", key: "down", display: keyBindings.down.toUpperCase() },
+                  { label: "Move Right", key: "right", display: keyBindings.right.toUpperCase() }
+                ].map((binding) => (
+                  <div key={binding.key} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, marginBottom: 3, color: darkMode ? "#CCCCCC" : "#555" }}>{binding.label}</div>
+                  <button
+                    onClick={() => setIsRebindingKey(binding.key)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      fontSize: 11,
+                      backgroundColor: isRebindingKey === binding.key ? "#ffeb3b" : (darkMode ? "#333333" : "#f0f0f0"),
+                      border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                      borderRadius: 3,
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      color: isRebindingKey === binding.key ? "#000" : (darkMode ? "#FFFFFF" : "#333")
+                    }}
+                  >
+                    {isRebindingKey === binding.key ? "Press any key..." : binding.display}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Flag Keys */}
             <div>
-              Credit to Black Squirrel for Winmine 31/NT4 and 2000+ Texture!:
-              <br />
+              <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Flag Keys (Arrows)</div>
+              {[
+                { label: "Flag Up", key: "flagUp", display: keyBindings.flagUp.toUpperCase() },
+                { label: "Flag Left", key: "flagLeft", display: keyBindings.flagLeft.toUpperCase() },
+                { label: "Flag Down", key: "flagDown", display: keyBindings.flagDown.toUpperCase() },
+                { label: "Flag Right", key: "flagRight", display: keyBindings.flagRight.toUpperCase() }
+              ].map((binding) => (
+                <div key={binding.key} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, marginBottom: 3, color: darkMode ? "#CCCCCC" : "#555" }}>{binding.label}</div>
+                  <button
+                    onClick={() => setIsRebindingKey(binding.key)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      fontSize: 11,
+                      backgroundColor: isRebindingKey === binding.key ? "#ffeb3b" : (darkMode ? "#333333" : "#f0f0f0"),
+                      border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                      borderRadius: 3,
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      color: isRebindingKey === binding.key ? "#000" : (darkMode ? "#FFFFFF" : "#333")
+                    }}
+                  >
+                    {isRebindingKey === binding.key ? "Press any key..." : binding.display}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+            <button
+              onClick={() => {
+                const defaultBindings = {
+                  up: "w",
+                  down: "s",
+                  left: "a",
+                  right: "d",
+                  flagUp: "arrowup",
+                  flagDown: "arrowdown",
+                  flagLeft: "arrowleft",
+                  flagRight: "arrowright"
+                };
+                setKeyBindings(defaultBindings);
+                localStorage.setItem("minestickerKeyBindings", JSON.stringify(defaultBindings));
+                setIsRebindingKey(null);
+              }}
+              style={{
+                padding: "6px 12px",
+                fontSize: 11,
+                backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+                color: darkMode ? "#FFFFFF" : "#000000",
+                border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                borderRadius: 3,
+                cursor: "pointer"
+              }}
+            >
+              Reset to Default
+            </button>
+          </div>
+        </div>
+
+        
+
+        <div style={{ marginTop: 24, maxWidth: 700 }}>
+          <div style={{ fontSize: 11, color: "#555", marginTop: 12, lineHeight: 1.6 }}>
+            <div>
+              Any Suggestion, Feedback or Bug Report?
+              <a href="https://minesticker-support.straw.page" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
+                &nbsp;Send Anonymously via My MineSticker Straw.Page!
+              </a><br />
+            </div>
+             <div style={{ fontWeight: "bold", marginBottom: 4 }}>Changelogs (GMT+7):</div>
+            <div>Version 0.1.0: Website is Deployed (3 P.M, Feb 4, 2026) </div>
+            <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Diagonal Movement, Custom Keybind, Quick Start/Restart and other Q.O.Ls!; Added Hard Reset! (Feb 5, 2026)</div>
+            <div style={{ fontWeight: "bold", marginBottom: 4 }}>  </div>
+            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
+            <div>Website and TDL's texture were made by&nbsp;
+              <a href="https://x.com/scottandersinn" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
+                ScottAndersinn
+              </a></div>
+            <div>Explosion Animation and Sound Effect were taken directly from&nbsp;
+              <a href="https://www.youtube.com/watch?v=PCtr04cnx5A" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
+                Animator vs Animation 3 - Alan Becker
+              </a></div>
+            <div>Credit to Black Squirrel for&nbsp;
               <a href="https://www.spriters-resource.com/pc_computer/minesweeper/asset/19849/" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                https://www.spriters-resource.com/pc_computer/minesweeper/asset/19849/
+                Winmine 31/NT4 and 2000+ Texture!
               </a>
             </div>
           </div>
         </div>
       </section>
-
-      {/* <section style={{ marginTop: 24 }}>
-        <h2>Texture Gallery</h2>
-        
-        <h3>Faces</h3>
-        <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
-          {Object.entries(FACE_COORDS).map(([name, coords]) => {
-            const width = coords.x2 - coords.x1 + 1;
-            const height = coords.y2 - coords.y1 + 1;
-            return (
-              <div key={name} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div
-                  style={{
-                    width,
-                    height,
-                    backgroundImage: `url(${SPRITE_SHEET})`,
-                    backgroundPosition: `-${coords.x1}px -${coords.y1}px`,
-                    backgroundSize: "auto",
-                    border: "2px solid #333",
-                    marginBottom: 8
-                  }}
-                />
-                <span style={{ fontSize: 12, fontWeight: "bold" }}>{name}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        <h3>Tiles</h3>
-        <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-          {Object.entries(TILE_COORDS).map(([name, coords]) => {
-            const width = coords.x2 - coords.x1 + 1;
-            const height = coords.y2 - coords.y1 + 1;
-            return (
-              <div key={name} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div
-                  style={{
-                    width,
-                    height,
-                    backgroundImage: `url(${SPRITE_SHEET})`,
-                    backgroundPosition: `-${coords.x1}px -${coords.y1}px`,
-                    backgroundSize: "auto",
-                    border: "2px solid #333",
-                    marginBottom: 8
-                  }}
-                />
-                <span style={{ fontSize: 11, fontWeight: "bold" }}>{name}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        <h3>Numbers</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          {Object.entries(NUMBER_COORDS).map(([name, coords]) => {
-            const width = coords.x2 - coords.x1 + 1;
-            const height = coords.y2 - coords.y1 + 1;
-            return (
-              <div key={name} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div
-                  style={{
-                    width,
-                    height,
-                    backgroundImage: `url(${SPRITE_SHEET})`,
-                    backgroundPosition: `-${coords.x1}px -${coords.y1}px`,
-                    backgroundSize: "auto",
-                    border: "2px solid #333",
-                    marginBottom: 6
-                  }}
-                />
-                <span style={{ fontSize: 10, fontWeight: "bold" }}>{name}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section> */}
-      <Analytics />
     </div>
   );
 }
