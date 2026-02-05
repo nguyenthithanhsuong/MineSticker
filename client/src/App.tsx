@@ -2210,7 +2210,7 @@ export default function App() {
             </div>
              <div style={{ fontWeight: "bold", marginBottom: 4 }}>Changelogs (GMT+7):</div>
             <div>Version 0.1.0: Website is Deployed (3 P.M, Feb 4, 2026) </div>
-            <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Custom Keybind, Quick Start/Restart, Volume Support; Game and Settings can now be saved and hard resetted. (Feb 5, 2026)</div>
+            <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Diagonal Movement, Custom Keybind, Quick Start/Restart and other Q.O.Ls!; Added Hard Reset! (Feb 5, 2026)</div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>  </div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
             <div>Website and TDL's texture were made by&nbsp;
