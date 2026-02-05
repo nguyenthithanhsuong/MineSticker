@@ -63,6 +63,169 @@ interface ScorchState {
   id: number;
 }
 
+// No Guessing Mode: Mine generation that ensures the board is always solvable
+class MineSolver {
+  private grid: boolean[][] = [];
+  private w: number;
+  private h: number;
+
+  constructor(w: number, h: number) {
+    this.w = w;
+    this.h = h;
+    this.grid = Array(h).fill(null).map(() => Array(w).fill(false));
+  }
+
+  setMine(x: number, y: number, isMine: boolean) {
+    if (x >= 0 && x < this.w && y >= 0 && y < this.h) {
+      this.grid[y][x] = isMine;
+    }
+  }
+
+  getMineCount(x: number, y: number): number {
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.grid[ny][nx]) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  // Check if starting position will open a safe area (has 0 adjacent mines)
+  hasZeroAdjacentMines(startX: number, startY: number): boolean {
+    return this.getMineCount(startX, startY) === 0;
+  }
+
+  // Flood fill to open adjacent safe squares - returns how many tiles are opened
+  private countFloodFill(x: number, y: number): number {
+    const queue: Array<[number, number]> = [[x, y]];
+    const visited = new Set<string>();
+    let openedCount = 0;
+
+    while (queue.length > 0) {
+      const [cx, cy] = queue.shift()!;
+      const key = `${cx},${cy}`;
+
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      if (cx < 0 || cx >= this.w || cy < 0 || cy >= this.h) continue;
+      if (this.grid[cy][cx]) continue; // Skip mines
+
+      openedCount++;
+      const mineCount = this.getMineCount(cx, cy);
+
+      if (mineCount === 0) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            const nkey = `${nx},${ny}`;
+            if (!visited.has(nkey)) {
+              queue.push([nx, ny]);
+            }
+          }
+        }
+      }
+    }
+
+    return openedCount;
+  }
+
+  // Validates that the board is solvable from the starting position
+  isSolvable(startX: number, startY: number): boolean {
+    // Critical requirement: starting position AND its neighbors must have 0 adjacent mines
+    // This ensures the entire 3x3 area (which gets cleared) will cascade well
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = startX + dx;
+        const ny = startY + dy;
+        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h) {
+          if (this.getMineCount(nx, ny) > 0) {
+            // If any tile in the 3x3 area has adjacent mines, it's not ideal
+            // We want the entire area to be zeros for a good cascade
+            return false;
+          }
+        }
+      }
+    }
+
+    // Check that starting position opens a large enough area
+    // (at least 12 tiles to ensure good opening)
+    const openedCount = this.countFloodFill(startX, startY);
+    if (openedCount < 12) {
+      return false;
+    }
+
+    return true;
+  }
+
+  getGrid(): boolean[][] {
+    return this.grid;
+  }
+}
+
+function generateNoGuessingBoard(rows: number, cols: number, mineCount: number, startRow: number, startCol: number): Matrix<Tile> {
+  const maxAttempts = 500;
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const solver = new MineSolver(cols, rows);
+    const positions = new Set<number>();
+    const total = rows * cols;
+    
+    // Extended forbidden zone: 5x5 area around start position
+    // This ensures the entire 3x3 starting area will have 0 adjacent mines
+    // (since the closest mine will be 2 tiles away from the center)
+    const forbidden = new Set<number>();
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const r = startRow + dy;
+        const c = startCol + dx;
+        if (r >= 0 && r < rows && c >= 0 && c < cols) {
+          forbidden.add(r * cols + c);
+        }
+      }
+    }
+
+    // Place mines randomly
+    while (positions.size < mineCount && positions.size < total - 1) {
+      const idx = Math.floor(Math.random() * total);
+      if (!forbidden.has(idx)) {
+        positions.add(idx);
+      }
+    }
+
+    // Set mines in solver
+    positions.forEach(idx => {
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      solver.setMine(col, row, true);
+    });
+
+    // Check if this board is solvable
+    // The key requirement: starting position must have 0 adjacent mines
+    // This guarantees no guessing on the first move
+    if (solver.isSolvable(startCol, startRow)) {
+      // Build the matrix
+      const matrix = new Matrix<Tile>(rows, cols, () => new Tile("tile0"));
+      positions.forEach(idx => {
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        const tile = matrix.get(row, col);
+        if (tile) tile.isMine = true;
+      });
+      return matrix;
+    }
+  }
+
+  // Fallback to random generation if no solvable board found
+  return createMatrix(rows, cols, mineCount);
+}
+
 function createMatrix(rows: number, cols: number, mines: number) {
   const matrix = new Matrix<Tile>(rows, cols, () => new Tile("tile0"));
   const total = rows * cols;
@@ -221,6 +384,15 @@ export default function App() {
     const stored = localStorage.getItem("minestickerKeyButtonScaleCollapsed");
     return stored ? JSON.parse(stored) : false;
   });
+  const [isCustomModeCollapsed, setIsCustomModeCollapsed] = useState(() => {
+    const stored = localStorage.getItem("minestickerCustomModeCollapsed");
+    return stored ? JSON.parse(stored) : true;
+  });
+  const [customWidth, setCustomWidth] = useState(16);
+  const [customHeight, setCustomHeight] = useState(16);
+  const [customMineDensity, setCustomMineDensity] = useState(15);
+  const [difficultyType, setDifficultyType] = useState<"easy" | "normal" | "hard" | "custom">("easy");
+  const [gameMode, setGameMode] = useState<"classic" | "no-guessing">("classic");
   const INTRO_FRAME_SEQUENCE = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const GRID_SIZE = 16; // Tile size in pixels
   const KABOOM_FRAME_SIZE = 270;
@@ -287,6 +459,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("minestickerKeyButtonScaleCollapsed", JSON.stringify(isKeyButtonScaleCollapsed));
   }, [isKeyButtonScaleCollapsed]);
+
+  // Save custom mode collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem("minestickerCustomModeCollapsed", JSON.stringify(isCustomModeCollapsed));
+  }, [isCustomModeCollapsed]);
 
   const saveGameState = (
     matrix: Matrix<Tile>,
@@ -389,12 +566,23 @@ export default function App() {
       }
     }
 
-    // Determine mine explosion frequency based on difficulty
-    let explosionFrequency = 1; // Easy: 9x9 - every mine
-    if (gridSize.rows === 16 && gridSize.cols === 16) {
-      explosionFrequency = 2; // Normal: 16x16 - every 2 mines
-    } else if (gridSize.rows === 16 && gridSize.cols === 30) {
-      explosionFrequency = 3; // Hard: 30x16 - every 3 mines
+    // Determine mine explosion frequency based on mine count
+    // < 15 = 1, 15-30 = 1, 30-60 = 2, 60-120 = 2, 120-300 = 3, >= 300 = 4
+    let explosionFrequency = 1; // Very small (< 15 mines)
+    if (mineCount >= 15 && mineCount < 30) {
+      explosionFrequency = 1; // Small (15-30 mines)
+    } else if (mineCount >= 30 && mineCount < 60) {
+      explosionFrequency = 2; // Small-medium (30-60 mines)
+    } else if (mineCount >= 60 && mineCount < 120) {
+      explosionFrequency = 2; // Medium (60-120 mines)
+    } else if (mineCount >= 120 && mineCount < 240) {
+      explosionFrequency = 3; // Large (120-240 mines)
+    } else if (mineCount >= 240 && mineCount < 360) {
+      explosionFrequency = 4; // Very large (>= 240 mines)
+    } else if (mineCount >= 360 && mineCount < 480) {
+      explosionFrequency = 5; // Very large (>= 360 mines)
+    } else if (mineCount >= 480) {
+      explosionFrequency = 7; // Very large (>= 480 mines)
     }
 
     const targets = mines
@@ -465,12 +653,19 @@ export default function App() {
     // First 7 frames at 10 FPS (100ms), last 9 frames at 6 FPS (166.67ms)
     const frameInterval = 100; // Use constant interval, check frame in update
     
-    // Determine explosion cadence based on difficulty
-    let explosionCadence = 5; // Easy: 9x9
-    if (gridSize.rows === 16 && gridSize.cols === 16) {
-      explosionCadence = 3; // Normal: 16x16
-    } else if (gridSize.rows === 16 && gridSize.cols === 30) {
-      explosionCadence = 2; // Hard: 30x16
+    // Determine explosion cadence based on mine count
+    // < 15 = 5, 15-30 = 4, 30-60 = 3, 60-120 = 2, 120-300 = 2, >= 300 = 1
+    let explosionCadence = 5; // Very small (< 15 mines)
+    if (mineCount >= 15 && mineCount < 30) {
+      explosionCadence = 4; // Small (15-30 mines)
+    } else if (mineCount >= 30 && mineCount < 60) {
+      explosionCadence = 3; // Small-medium (30-60 mines)
+    } else if (mineCount >= 60 && mineCount < 120) {
+      explosionCadence = 2; // Medium (60-120 mines)
+    } else if (mineCount >= 120 && mineCount < 240) {
+      explosionCadence = 2; // Large (120-240 mines)
+    } else if (mineCount >= 240) {
+      explosionCadence = 1; // Very large (>= 240 mines)
     }
     
     const kaboomIntervalId = setInterval(() => {
@@ -513,17 +708,21 @@ export default function App() {
           setScorchMarks((scorches) => [...scorches, ...scorchesToAdd]);
         }
         
-        // If no explosions left and queue is empty, stop the interval
-        if (updated.length === 0 && explosionQueueRef.current.length === 0) {
-          clearInterval(kaboomIntervalId);
-        }
-        
         return updated;
       });
     }, frameInterval);
 
     return () => clearInterval(kaboomIntervalId);
-  }, [status, gridSize]);
+  }, [status, gridSize, mineCount]);
+
+  // Clear explosions when all are complete and queue is empty
+  useEffect(() => {
+    if (status !== "lost") return;
+    if (activeExplosions.length === 0 && explosionQueueRef.current.length === 0) {
+      // All explosions have finished naturally
+      setActiveExplosions([]);
+    }
+  }, [status, activeExplosions.length]);
 
   // Trigger cheer animation when game is won and no animations are playing
   useEffect(() => {
@@ -748,11 +947,18 @@ export default function App() {
       if (key === "enter") {
         if (gameStarted) {
           // Restart current game
-          setDifficulty(gridSize.rows, gridSize.cols, mineCount);
+          setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
         } else if (status === "playing") {
           // Randomly pick a starter tile if game hasn't started
           const randomRow = Math.floor(Math.random() * gridSize.rows);
           const randomCol = Math.floor(Math.random() * gridSize.cols);
+          
+          // In no-guessing mode, regenerate board with this random position as start
+          if (gameMode === "no-guessing") {
+            const newMatrix = generateNoGuessingBoard(gridSize.rows, gridSize.cols, mineCount, randomRow, randomCol);
+            setLocalMatrix(newMatrix);
+          }
+          
           toggleFlag(randomRow, randomCol);
         }
         return;
@@ -1006,16 +1212,26 @@ export default function App() {
     lastWasVerticalMirroredRef.current = false;
   };
 
-  const setDifficulty = (rows: number, cols: number, mines: number) => {
+  const setDifficulty = (rows: number, cols: number, mines: number, type: "easy" | "normal" | "hard" | "custom" = "easy") => {
     clearAllAnimations();
     setGridSize({ rows, cols });
     setMineCount(mines);
-    setLocalMatrix(createMatrix(rows, cols, mines));
+    
+    // Use appropriate mine generation based on game mode
+    let matrix: Matrix<Tile>;
+    if (gameMode === "no-guessing") {
+      matrix = generateNoGuessingBoard(rows, cols, mines, 0, 0);
+    } else {
+      matrix = createMatrix(rows, cols, mines);
+    }
+    
+    setLocalMatrix(matrix);
     setCharPos({ row: 0, col: 0 });
     setStatus("playing");
     setFirstMove(true);
     setGameStarted(false);
     setTimer(0);
+    setDifficultyType(type);
     // Clear saved game state when starting new game
     localStorage.removeItem("minestickerGameState");
   };
@@ -1033,6 +1249,7 @@ export default function App() {
     localStorage.removeItem("minestickerKeyBindingsCollapsed");
     localStorage.removeItem("minestickerKeyButtonScale");
     localStorage.removeItem("minestickerKeyButtonScaleCollapsed");
+    localStorage.removeItem("minestickerCustomModeCollapsed");
     
     // Reset all state to defaults
     setKeyBindings({
@@ -1053,7 +1270,11 @@ export default function App() {
     setIsSoundVolumeCollapsed(true);
     setIsKeyBindingsCollapsed(true);
     setIsKeyButtonScaleCollapsed(true);
+    setIsCustomModeCollapsed(true);
     setKeyButtonScale(0.5);
+    setCustomWidth(16);
+    setCustomHeight(16);
+    setCustomMineDensity(15);
     setDifficulty(9, 9, 10);
   };
 
@@ -1566,6 +1787,8 @@ export default function App() {
           }}
         >
           <div className="p-4 bg-gray-900 text-white rounded-lg">
+            <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+          Version 0.3.0 - February 6th 2026 (GMT +7) </p>
         <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
           Inspired by Animator vs Animation 3 - Alan Becker</p>
           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
@@ -1605,14 +1828,79 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button type="button" onClick={() => setDifficulty(9, 9, 10)}>
+          <button 
+            type="button" 
+            onClick={() => {
+              setGameMode("classic");
+              setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
+            }}
+            style={{
+              backgroundColor: gameMode === "classic" ? "#4CAF50" : "#888888",
+              color: "white",
+              border: "none",
+              padding: "6px 12px",
+              cursor: "pointer",
+              borderRadius: "4px",
+              fontWeight: "bold"
+            }}
+          >
+            Classic
+          </button>
+          <button 
+            type="button" 
+            onClick={() => {
+              setGameMode("no-guessing");
+              setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
+            }}
+            style={{
+              backgroundColor: gameMode === "no-guessing" ? "#2196F3" : "#888888",
+              color: "white",
+              border: "none",
+              padding: "6px 12px",
+              cursor: "pointer",
+              borderRadius: "4px",
+              fontWeight: "bold"
+            }}
+          >
+            No Guessing
+          </button>
+         {/* Change the wrapper div to this: */}
+<div style={{ flexBasis: "100%", width: "100%" }}>
+  {gameMode === "no-guessing" && (
+    <div style={{ 
+      fontSize: 13, 
+      color: darkMode ? "#CCCCCC" : "#666", 
+      fontStyle: "italic", 
+      marginLeft: 8, 
+      marginTop: 8 // Increased margin for better spacing
+    }}>
+      No Guessing mode is very experimental right now! It's more like a 'Safe Start' mode! 
+      <br />
+      Please contact me if you encounter any 50/50s in this mode, it'll help me improve the mine randomization!
+    </div>
+  )}
+</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" onClick={() => setDifficulty(9, 9, 10, "easy")}>
             Easy 9x9
           </button>
-          <button type="button" onClick={() => setDifficulty(16, 16, 40)}>
+          <button type="button" onClick={() => setDifficulty(16, 16, 40, "normal")}>
             Normal 16x16
           </button>
-          <button type="button" onClick={() => setDifficulty(16, 30, 99)}>
+          <button type="button" onClick={() => setDifficulty(16, 30, 99, "hard")}>
             Hard 30x16
+          </button>
+          <button type="button" onClick={() => {
+            const width = Math.max(7, Math.min(50, customWidth));
+            const height = Math.max(7, Math.min(50, customHeight));
+            const density = Math.max(10, Math.min(25, customMineDensity));
+            const mines = Math.floor((width * height * density) / 100);
+            setDifficultyType("custom");
+            setIsCustomModeCollapsed(false);
+            setDifficulty(height, width, mines, "custom");
+          }}>
+            Custom {customWidth}x{customHeight}
           </button>
           <button
             type="button"
@@ -1630,6 +1918,146 @@ export default function App() {
             {darkMode ? "Dark" : "Light"}
           </button>
         </div>
+        
+        {difficultyType === "custom" && (
+          <div style={{ marginTop: 12, marginBottom: 12, maxWidth: 300 }}>
+            <div
+              onClick={() => setIsCustomModeCollapsed(!isCustomModeCollapsed)}
+              style={{
+                cursor: "pointer",
+                userSelect: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: isCustomModeCollapsed ? 0 : 12
+              }}
+            >
+              <span style={{ fontSize: 16 }}>
+                {isCustomModeCollapsed ? "▶" : "▼"}
+              </span>
+              <label style={{ margin: 0, fontSize: 12, color: darkMode ? "#FFFFFF" : "#000000", fontWeight: "bold" }}>
+                Custom Difficulty Settings
+              </label>
+            </div>
+            <div
+              style={{
+                maxHeight: isCustomModeCollapsed ? 0 : "500px",
+                overflow: "hidden",
+                transition: "max-height 0.3s ease-in-out",
+                marginBottom: isCustomModeCollapsed ? 0 : 16
+              }}
+            >
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: darkMode ? "#CCCCCC" : "#555", display: "block", marginBottom: 4 }}>
+                  Width (7-50): {customWidth}
+                </label>
+                <input
+                  type="number"
+                  min="7"
+                  max="50"
+                  value={customWidth}
+                  onChange={(e) => setCustomWidth(Math.max(7, Math.min(50, parseInt(e.target.value) || 7)))}
+                  style={{
+                    width: "100%",
+                    padding: "6px",
+                    fontSize: 12,
+                    backgroundColor: darkMode ? "#333333" : "#ffffff",
+                    color: darkMode ? "#FFFFFF" : "#000000",
+                    border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                    borderRadius: 2
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: darkMode ? "#CCCCCC" : "#555", display: "block", marginBottom: 4 }}>
+                  Height (7-50): {customHeight}
+                </label>
+                <input
+                  type="number"
+                  min="7"
+                  max="50"
+                  value={customHeight}
+                  onChange={(e) => setCustomHeight(Math.max(7, Math.min(50, parseInt(e.target.value) || 7)))}
+                  style={{
+                    width: "100%",
+                    padding: "6px",
+                    fontSize: 12,
+                    backgroundColor: darkMode ? "#333333" : "#ffffff",
+                    color: darkMode ? "#FFFFFF" : "#000000",
+                    border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                    borderRadius: 2
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, color: darkMode ? "#CCCCCC" : "#555", display: "block", marginBottom: 4 }}>
+                  Mine Density (10-25%): {customMineDensity}%
+                </label>
+                <input
+                  type="range"
+                  min="10"
+                  max="25"
+                  value={customMineDensity}
+                  onChange={(e) => setCustomMineDensity(parseInt(e.target.value))}
+                  style={{
+                    width: "100%",
+                    cursor: "pointer",
+                    marginBottom: 4
+                  }}
+                />
+                <div style={{ fontSize: 10, color: darkMode ? "#999999" : "#666" }}>
+                  Mines: {Math.floor((customWidth * customHeight * customMineDensity) / 100)} / {customWidth * customHeight} tiles
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const width = Math.max(7, Math.min(50, customWidth));
+                    const height = Math.max(7, Math.min(50, customHeight));
+                    const density = Math.max(10, Math.min(25, customMineDensity));
+                    const mines = Math.floor((width * height * density) / 100);
+                    setDifficulty(height, width, mines, "custom");
+                  }}
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    backgroundColor: "#4CAF50",
+                    color: "#FFFFFF",
+                    border: "1px solid #45a049",
+                    borderRadius: 2,
+                    fontWeight: "bold",
+                    flex: 1
+                  }}
+                >
+                  Set Custom
+                </button>
+                <button
+                  onClick={() => {
+                    setCustomWidth(16);
+                    setCustomHeight(16);
+                    setCustomMineDensity(15);
+                  }}
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    backgroundColor: darkMode ? "#333333" : "#f0f0f0",
+                    color: darkMode ? "#FFFFFF" : "#000000",
+                    border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                    borderRadius: 2,
+                    flex: 1
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Game board with counter and matrix */}
         <div style={{
@@ -1667,7 +2095,7 @@ export default function App() {
                 onMouseUp={() => setIsFacePressed(false)}
                 onMouseLeave={() => setIsFacePressed(false)}
                 onClick={() => {
-                  setDifficulty(gridSize.rows, gridSize.cols, mineCount);
+                  setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
                   if (stepOnBlockAudio.current) {
                     stepOnBlockAudio.current.currentTime = 0;
                     stepOnBlockAudio.current.play().catch(() => {});
@@ -1719,6 +2147,12 @@ export default function App() {
                 key={i}
                 onClick={() => {
                   if (!gameStarted) {
+                    // In no-guessing mode, regenerate board with this position as start
+                    if (gameMode === "no-guessing") {
+                      const newMatrix = generateNoGuessingBoard(gridSize.rows, gridSize.cols, mineCount, row, col);
+                      setLocalMatrix(newMatrix);
+                    }
+                    
                     // First, clear mines from the starter area
                     setLocalMatrix((prev) => {
                       const next = cloneMatrix(prev);
@@ -2231,6 +2665,7 @@ export default function App() {
              <div style={{ fontWeight: "bold", marginBottom: 4 }}>Changelogs (GMT+7):</div>
             <div>Version 0.1.0: Website is Deployed (3 P.M, Feb 4, 2026) </div>
             <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Diagonal Movement, Custom Keybind, Quick Start/Restart and other Q.O.Ls!; Added Hard Reset! (Feb 5, 2026)</div>
+            <div>Version 0.3.0: Added Custom Mode and No Guessing Mode [Experimental] (Feb 6, 2026)</div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>  </div>
             <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
             <div>Website and TDL's texture were made by&nbsp;
