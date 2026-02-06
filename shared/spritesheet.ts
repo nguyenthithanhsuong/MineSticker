@@ -19,6 +19,7 @@ export const SCORCH_SPRITE_SHEET = "/scorch.png";
 export const PLACEFLAG_SPRITE_SHEET = "/placeflag.png";
 export const CHEER_SPRITE_SHEET = "/cheer.png";
 export const DIAGONAL_SPRITE_SHEET = "/diagonal.png";
+export const JUMP_SPRITE_SHEET = "/jump.png";
 
 export const FACE_COORDS: Record<string, TextureCoords> = {
   face1: { x1: 0, y1: 24, x2: 23, y2: 47 },
@@ -65,6 +66,9 @@ export const KEY_COORDS: Record<string, TextureCoords> = {
   keyA: { x1: 50, y1: 0, x2: 99, y2: 49 },
   keyS: { x1: 100, y1: 0, x2: 149, y2: 49 },
   keyD: { x1: 150, y1: 0, x2: 199, y2: 49 },
+  chordOff: { x1: 250, y1: 0, x2: 299, y2: 49 },
+  chordOn: { x1: 300, y1: 0, x2: 349, y2: 49 },
+  jump: { x1: 350, y1: 0, x2: 399, y2: 49 },
   arrowUp: { x1: 0, y1: 50, x2: 49, y2: 99 },
   arrowUpLeft: { x1: 50, y1: 50, x2: 99, y2: 99 },
   arrowLeft: { x1: 100, y1: 50, x2: 149, y2: 99 },
@@ -387,4 +391,18 @@ export const DIAGONAL_COORDS: Record<string, TextureCoords> = {
   diagonalTopRight8: { x1: 896, y1: 336, x2: 1007, y2: 447 },
   diagonalTopRight9: { x1: 1008, y1: 336, x2: 1119, y2: 447 },
   diagonalTopRight10: { x1: 1120, y1: 336, x2: 1231, y2: 447 }
+};
+
+// Jump animation (10 columns x 1 row, frame size: 112x112)
+export const JUMP_COORDS: Record<string, TextureCoords> = {
+  jump0: { x1: 0, y1: 0, x2: 111, y2: 111 },
+  jump1: { x1: 112, y1: 0, x2: 223, y2: 111 },
+  jump2: { x1: 224, y1: 0, x2: 335, y2: 111 },
+  jump3: { x1: 336, y1: 0, x2: 447, y2: 111 },
+  jump4: { x1: 448, y1: 0, x2: 559, y2: 111 },
+  jump5: { x1: 560, y1: 0, x2: 671, y2: 111 },
+  jump6: { x1: 672, y1: 0, x2: 783, y2: 111 },
+  jump7: { x1: 784, y1: 0, x2: 895, y2: 111 },
+  jump8: { x1: 896, y1: 0, x2: 1007, y2: 111 },
+  jump9: { x1: 1008, y1: 0, x2: 1119, y2: 111 }
 };

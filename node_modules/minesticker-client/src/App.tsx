@@ -4,7 +4,6 @@ import {
   Face,
   Matrix,
   Tile,
-  TileTexture,
   SPRITE_SHEET,
   CHAR_SPRITE_SHEET,
   IDLE_SPRITE_SHEET,
@@ -13,11 +12,10 @@ import {
   CHILLWALK_SPRITE_SHEET,
   PANIC_SPRITE_SHEET,
   DEAD_SPRITE_SHEET,
-  KABOOM_SPRITE_SHEET,
-  SCORCH_SPRITE_SHEET,
   PLACEFLAG_SPRITE_SHEET,
   CHEER_SPRITE_SHEET,
   DIAGONAL_SPRITE_SHEET,
+  JUMP_SPRITE_SHEET,
   KEY_SPRITE_SHEET,
   TILE_COORDS,
   FACE_COORDS,
@@ -31,12 +29,25 @@ import {
   CHILLWALK_COORDS,
   PANIC_COORDS,
   DEAD_COORDS,
-  KABOOM_COORDS,
-  SCORCH_COORDS,
-  CHEER_COORDS,
   PLACEFLAG_COORDS,
-  DIAGONAL_COORDS
+  DIAGONAL_COORDS,
+  JUMP_COORDS
 } from "../../shared";
+import PatchNotes from "./patchnotes.tsx";
+import Credits from "./credit.tsx";
+import {
+  createMatrix,
+  cloneMatrix,
+  generateNoGuessingBoard,
+  numberTexture
+} from "./minegeneration.tsx";
+import {
+  resolveFlagDirection,
+  resolveMovementDirection,
+  KeyBindings
+} from "./movement.tsx";
+import GameAnimations, { ExplosionState, ScorchState } from "./render.tsx";
+import HeaderSection from "./header.tsx";
 
 interface GameState {
   rows: number;
@@ -48,283 +59,28 @@ interface GameState {
 
 type GameStatus = "playing" | "won" | "lost";
 
-interface ExplosionState {
-  row: number;
-  col: number;
-  frameIndex: number;
-  scale: number;
-  id: number;
-}
+const DEFAULT_KEY_BINDINGS: KeyBindings = {
+  up: "w",
+  down: "s",
+  left: "a",
+  right: "d",
+  flagUp: "arrowup",
+  flagDown: "arrowdown",
+  flagLeft: "arrowleft",
+  flagRight: "arrowright",
+  chord: "space"
+};
 
-interface ScorchState {
-  row: number;
-  col: number;
-  scale: number;
-  id: number;
-}
+const normalizeKey = (key: string) => {
+  const lower = key.toLowerCase();
+  if (lower === " " || lower === "spacebar") return "space";
+  return lower;
+};
 
-// True No Guessing Mode: Validates board is 100% solvable through logic
-class MineSolver {
-  private grid: boolean[][] = [];
-  private w: number;
-  private h: number;
-
-  constructor(w: number, h: number) {
-    this.w = w;
-    this.h = h;
-    this.grid = Array(h).fill(null).map(() => Array(w).fill(false));
-  }
-
-  setMine(x: number, y: number, isMine: boolean) {
-    if (x >= 0 && x < this.w && y >= 0 && y < this.h) {
-      this.grid[y][x] = isMine;
-    }
-  }
-
-  getMineCount(x: number, y: number): number {
-    let count = 0;
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h && this.grid[ny][nx]) {
-          count++;
-        }
-      }
-    }
-    return count;
-  }
-
-  // True solver: attempts to solve the board using only logical deduction
-  isSolvable(startX: number, startY: number): boolean {
-    // Ensure good starting area first
-    if (this.getMineCount(startX, startY) !== 0) {
-      return false;
-    }
-
-    // Create a knowledge grid: -2 = unknown, -1 = flagged mine, 0-8 = opened
-    const knowledge: number[][] = Array(this.h).fill(null).map(() => Array(this.w).fill(-2));
-    
-    // Open the starting position with flood fill
-    this.floodFillOpen(knowledge, startX, startY);
-
-    // Check if opening is large enough
-    let openedCount = 0;
-    for (let y = 0; y < this.h; y++) {
-      for (let x = 0; x < this.w; x++) {
-        if (knowledge[y][x] >= 0) openedCount++;
-      }
-    }
-    if (openedCount < 12) return false;
-
-    // Now try to solve using logic
-    let madeProgress = true;
-    let iterations = 0;
-    const maxIterations = 100;
-
-    while (madeProgress && iterations < maxIterations) {
-      madeProgress = false;
-      iterations++;
-
-      // For each opened cell with a number
-      for (let y = 0; y < this.h; y++) {
-        for (let x = 0; x < this.w; x++) {
-          if (knowledge[y][x] < 0) continue;
-
-          const number = knowledge[y][x];
-          if (number === 0) continue;
-
-          // Count unknowns and flags around this cell
-          const neighbors = this.getNeighbors(x, y);
-          const unknowns: Array<[number, number]> = [];
-          let flagCount = 0;
-
-          for (const [nx, ny] of neighbors) {
-            if (knowledge[ny][nx] === -2) {
-              unknowns.push([nx, ny]);
-            } else if (knowledge[ny][nx] === -1) {
-              flagCount++;
-            }
-          }
-
-          const remainingMines = number - flagCount;
-
-          // Rule 1: If remaining mines == unknown count, all unknowns are mines
-          if (remainingMines > 0 && remainingMines === unknowns.length) {
-            for (const [nx, ny] of unknowns) {
-              knowledge[ny][nx] = -1;
-              madeProgress = true;
-            }
-          }
-
-          // Rule 2: If remaining mines == 0, all unknowns are safe
-          if (remainingMines === 0 && unknowns.length > 0) {
-            for (const [nx, ny] of unknowns) {
-              this.floodFillOpen(knowledge, nx, ny);
-              madeProgress = true;
-            }
-          }
-        }
-      }
-    }
-
-    // Check if we solved everything
-    let totalMines = 0;
-    let solvedCells = 0;
-
-    for (let y = 0; y < this.h; y++) {
-      for (let x = 0; x < this.w; x++) {
-        if (this.grid[y][x]) totalMines++;
-        if (knowledge[y][x] >= -1) solvedCells++;
-      }
-    }
-
-    // Board is solvable if we identified all cells (no -2 unknowns left)
-    return solvedCells === this.w * this.h;
-  }
-
-  private getNeighbors(x: number, y: number): Array<[number, number]> {
-    const neighbors: Array<[number, number]> = [];
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx >= 0 && nx < this.w && ny >= 0 && ny < this.h) {
-          neighbors.push([nx, ny]);
-        }
-      }
-    }
-    return neighbors;
-  }
-
-  private floodFillOpen(knowledge: number[][], startX: number, startY: number) {
-    const queue: Array<[number, number]> = [[startX, startY]];
-    const visited = new Set<string>();
-
-    while (queue.length > 0) {
-      const [x, y] = queue.shift()!;
-      const key = `${x},${y}`;
-
-      if (visited.has(key)) continue;
-      visited.add(key);
-
-      if (x < 0 || x >= this.w || y < 0 || y >= this.h) continue;
-      if (knowledge[y][x] >= 0) continue; // Already opened
-      if (this.grid[y][x]) continue; // Don't open mines
-
-      const count = this.getMineCount(x, y);
-      knowledge[y][x] = count;
-
-      if (count === 0) {
-        for (const [nx, ny] of this.getNeighbors(x, y)) {
-          queue.push([nx, ny]);
-        }
-      }
-    }
-  }
-
-  getGrid(): boolean[][] {
-    return this.grid;
-  }
-}
-
-// Generate a TRUE no-guessing board - 100% solvable through logic alone
-function generateNoGuessingBoard(rows: number, cols: number, mineCount: number, startRow: number, startCol: number): Matrix<Tile> {
-  const maxAttempts = 2000; // Increased since true solvability is harder to find
-  
-  console.log("Generating true no-guessing board...");
-  
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const solver = new MineSolver(cols, rows);
-    const positions = new Set<number>();
-    const total = rows * cols;
-    
-    // Extended forbidden zone: 5x5 area around start position
-    // This ensures the entire 3x3 starting area will have 0 adjacent mines
-    // (since the closest mine will be 2 tiles away from the center)
-    const forbidden = new Set<number>();
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        const r = startRow + dy;
-        const c = startCol + dx;
-        if (r >= 0 && r < rows && c >= 0 && c < cols) {
-          forbidden.add(r * cols + c);
-        }
-      }
-    }
-
-    // Place mines randomly
-    while (positions.size < mineCount && positions.size < total - 1) {
-      const idx = Math.floor(Math.random() * total);
-      if (!forbidden.has(idx)) {
-        positions.add(idx);
-      }
-    }
-
-    // Set mines in solver
-    positions.forEach(idx => {
-      const row = Math.floor(idx / cols);
-      const col = idx % cols;
-      solver.setMine(col, row, true);
-    });
-
-    // Check if this board is 100% solvable through logic
-    if (solver.isSolvable(startCol, startRow)) {
-      console.log(`Found true no-guessing board on attempt ${attempt + 1}`);
-      // Build the matrix
-      const matrix = new Matrix<Tile>(rows, cols, () => new Tile("tile0"));
-      positions.forEach(idx => {
-        const row = Math.floor(idx / cols);
-        const col = idx % cols;
-        const tile = matrix.get(row, col);
-        if (tile) tile.isMine = true;
-      });
-      return matrix;
-    }
-
-    // Log progress every 100 attempts
-    if ((attempt + 1) % 100 === 0) {
-      console.log(`Still searching... attempt ${attempt + 1}/${maxAttempts}`);
-    }
-  }
-
-  // Fallback to random generation if no solvable board found
-  console.warn("Could not find 100% solvable board after", maxAttempts, "attempts, using classic");
-  return createMatrix(rows, cols, mineCount);
-}
-
-function createMatrix(rows: number, cols: number, mines: number) {
-  const matrix = new Matrix<Tile>(rows, cols, () => new Tile("tile0"));
-  const total = rows * cols;
-  const minePositions = new Set<number>();
-
-  while (minePositions.size < mines && minePositions.size < total) {
-    const random = Math.floor(Math.random() * total);
-    minePositions.add(random);
-  }
-
-  minePositions.forEach((index) => {
-    const row = Math.floor(index / cols);
-    const col = index % cols;
-    const tile = matrix.get(row, col);
-    if (tile) tile.isMine = true;
-  });
-
-  return matrix;
-}
-
-function cloneMatrix(matrix: Matrix<Tile>) {
-  return new Matrix<Tile>(matrix.rows, matrix.cols, (r, c) => {
-    const t = matrix.get(r, c) ?? new Tile("tile0");
-    return new Tile(t.texture, t.isMine, t.isOpen, t.isFlagged);
-  });
-}
-
-const numberTexture = (count: number): TileTexture => {
-  if (count <= 0) return "tile9";
-  if (count >= 8) return "tile8";
-  return (`tile${count}` as TileTexture);
+const formatKeyLabel = (key: string) => {
+  if (!key) return "UNBOUND";
+  if (key === "space") return "SPACE";
+  return key.toUpperCase();
 };
 
 export default function App() {
@@ -341,11 +97,13 @@ export default function App() {
   
   // Initialize audio on mount
   useEffect(() => {
-    flagPlaceAudio.current = new Audio("/placeflag.wav");
-    kaboomAudio.current = new Audio("/kaboom.wav");
-    chillWalkAudio.current = new Audio("/chillwalk.wav");
-    stepOnBlockAudio.current = new Audio("/steponblock.wav");
-    whooshAudio.current = new Audio("/whoosh.wav");
+    const createAudio = (fileName: string) => new Audio(fileName);
+
+    flagPlaceAudio.current = createAudio("placeflag.wav");
+    kaboomAudio.current = createAudio("kaboom.wav");
+    chillWalkAudio.current = createAudio("chillwalk.wav");
+    stepOnBlockAudio.current = createAudio("steponblock.wav");
+    whooshAudio.current = createAudio("whoosh.wav");
     
     // Preload all audio
     [flagPlaceAudio, kaboomAudio, chillWalkAudio, stepOnBlockAudio, whooshAudio].forEach(audio => {
@@ -369,27 +127,38 @@ export default function App() {
   const [pressedArrows, setPressedArrows] = useState<Set<string>>(new Set());
   const [pressedMovementKeys, setPressedMovementKeys] = useState<Set<string>>(new Set());
   const pressedMovementKeysRef = useRef<Set<string>>(new Set());
+  const chordHeldRef = useRef(false);
+  const pendingChordRef = useRef(false);
+  const pendingChordFromButtonRef = useRef(false);
+  const chordFailTimeoutRef = useRef<number | null>(null);
+  const lastExplosionAdvanceRef = useRef(0);
+  const lastMoveTapRef = useRef<Record<string, number>>({});
   const [animationFrame, setAnimationFrame] = useState(0);
   const [lastDirection, setLastDirection] = useState<"Up" | "Down" | "Left" | "Right">("Down");
   
   // Key bindings
-  const [keyBindings, setKeyBindings] = useState(() => {
+  const [keyBindings, setKeyBindings] = useState<KeyBindings>(() => {
     const stored = localStorage.getItem("minestickerKeyBindings");
-    return stored ? JSON.parse(stored) : {
-      up: "w",
-      down: "s",
-      left: "a",
-      right: "d",
-      flagUp: "arrowup",
-      flagDown: "arrowdown",
-      flagLeft: "arrowleft",
-      flagRight: "arrowright"
-    };
+    if (!stored) return { ...DEFAULT_KEY_BINDINGS };
+
+    try {
+      const parsed = JSON.parse(stored);
+      const merged = { ...DEFAULT_KEY_BINDINGS, ...parsed } as KeyBindings;
+      (Object.keys(merged) as Array<keyof KeyBindings>).forEach((bindingKey) => {
+        const value = merged[bindingKey];
+        merged[bindingKey] = typeof value === "string" ? normalizeKey(value) : DEFAULT_KEY_BINDINGS[bindingKey];
+      });
+      return merged;
+    } catch {
+      return { ...DEFAULT_KEY_BINDINGS };
+    }
   });
   const [isRebindingKey, setIsRebindingKey] = useState<string | null>(null);
   const [diagonalDirection, setDiagonalDirection] = useState<"TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null>(null);
   const [isMoving, setIsMoving] = useState(false);
+  const [isJumping, setIsJumping] = useState(false);
   const [walkFrameIndex, setWalkFrameIndex] = useState(0);
+  const [jumpFrameIndex, setJumpFrameIndex] = useState(0);
   const [isChillWalk, setIsChillWalk] = useState(false);
   const [isPanic, setIsPanic] = useState(false);
   const [panicFrameIndex, setPanicFrameIndex] = useState(0);
@@ -402,6 +171,7 @@ export default function App() {
   const [introFrameIndex, setIntroFrameIndex] = useState(0);
   const [introTargetPos, setIntroTargetPos] = useState<{ row: number; col: number } | null>(null);
   const [activeExplosions, setActiveExplosions] = useState<ExplosionState[]>([]);
+  const [characterExplosions, setCharacterExplosions] = useState<ExplosionState[]>([]);
   const [scorchMarks, setScorchMarks] = useState<ScorchState[]>([]);
   const explosionQueueRef = useRef<Array<{ row: number; col: number }>>([]);
   const explosionIdRef = useRef(0);
@@ -412,6 +182,9 @@ export default function App() {
   const lastWasVerticalMirroredRef = useRef(false);
   const lastVerticalDirectionRef = useRef<"Up" | "Down" | null>(null);
   const isMovingRef = useRef(false);
+  const isJumpingRef = useRef(false);
+  const pendingJumpChordRef = useRef(false);
+  const pendingJumpFromButtonRef = useRef(false);
   const skipNextAutoSaveRef = useRef(false);
   const [placingFlagDirection, setPlacingFlagDirection] = useState<"Up" | "Down" | "Left" | "Right" | "UpLeft" | "UpRight" | "DownLeft" | "DownRight" | null>(null);
   const [placeFlagFrameIndex, setPlaceFlagFrameIndex] = useState(0);
@@ -452,6 +225,14 @@ export default function App() {
     const stored = localStorage.getItem("minestickerKeyButtonScaleCollapsed");
     return stored ? JSON.parse(stored) : false;
   });
+  const [chordButtonActive, setChordButtonActive] = useState(() => {
+    const stored = localStorage.getItem("minestickerChordButtonActive");
+    return stored ? JSON.parse(stored) : false;
+  });
+  const [chordButtonMode, setChordButtonMode] = useState<"toggle" | "one-shot">(() => {
+    const stored = localStorage.getItem("minestickerChordButtonMode");
+    return stored === "one-shot" || stored === "toggle" ? stored : "toggle";
+  });
   const [isCustomModeCollapsed, setIsCustomModeCollapsed] = useState(() => {
     const stored = localStorage.getItem("minestickerCustomModeCollapsed");
     return stored ? JSON.parse(stored) : true;
@@ -465,6 +246,8 @@ export default function App() {
   const GRID_SIZE = 16; // Tile size in pixels
   const KABOOM_FRAME_SIZE = 270;
   const SCORCH_FRAME_SIZE = 200;
+  const CHORD_DOUBLE_TAP_MS = 400;
+  const CHORD_FAIL_FLASH_MS = 200;
 
   // Count flags in the matrix
   const flagCount = localMatrix.data.flat().filter((tile: Tile) => tile.isFlagged).length;
@@ -475,6 +258,7 @@ export default function App() {
     base: Math.max(8, 42 * (30 / animationSpeed)),
     intro: 50, // Fixed at 30 FPS (1000ms / 30fps = 33.33ms)
     walk: Math.max(8, 40 * (30 / animationSpeed)),
+    jump: Math.max(8, 38 * (30 / animationSpeed)),
     flag: Math.max(8, (1000 / animationSpeed) * 2.5),
     panic: 100, // 1600ms / 16 frames
     cheer: 100  // 400ms / 4 frames
@@ -527,6 +311,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("minestickerKeyButtonScaleCollapsed", JSON.stringify(isKeyButtonScaleCollapsed));
   }, [isKeyButtonScaleCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("minestickerChordButtonActive", JSON.stringify(chordButtonActive));
+  }, [chordButtonActive]);
+
+  useEffect(() => {
+    localStorage.setItem("minestickerChordButtonMode", chordButtonMode);
+  }, [chordButtonMode]);
 
   // Save custom mode collapsed state to localStorage
   useEffect(() => {
@@ -621,6 +413,50 @@ export default function App() {
     }
   }, [status, gameStarted]);
 
+  const advanceExplosionFrames = () => {
+    lastExplosionAdvanceRef.current = Date.now();
+    setActiveExplosions((prev) => {
+      const scorchesToAdd: ScorchState[] = [];
+      const updated = prev
+        .map((exp) => {
+          if (exp.frameIndex === 6) {
+            scorchIdRef.current += 1;
+            scorchesToAdd.push({ row: exp.row, col: exp.col, scale: exp.scale, id: scorchIdRef.current });
+          }
+          return { ...exp, frameIndex: exp.frameIndex + 1 };
+        })
+        .filter((exp) => exp.frameIndex < 16);
+
+      if (scorchesToAdd.length > 0) {
+        setScorchMarks((scorches) => [...scorches, ...scorchesToAdd]);
+      }
+
+      return updated;
+    });
+  };
+
+  const advanceCharacterExplosionFrames = () => {
+    setCharacterExplosions((prev) => {
+      if (prev.length === 0) return prev;
+      const scorchesToAdd: ScorchState[] = [];
+      const updated = prev
+        .map((exp) => {
+          if (exp.frameIndex === 6) {
+            scorchIdRef.current += 1;
+            scorchesToAdd.push({ row: exp.row, col: exp.col, scale: exp.scale, id: scorchIdRef.current });
+          }
+          return { ...exp, frameIndex: exp.frameIndex + 1 };
+        })
+        .filter((exp) => exp.frameIndex < 16);
+
+      if (scorchesToAdd.length > 0) {
+        setScorchMarks((scorches) => [...scorches, ...scorchesToAdd]);
+      }
+
+      return updated;
+    });
+  };
+
   // Kaboom explosion sequence when losing
   useEffect(() => {
     if (status !== "lost") return;
@@ -689,8 +525,7 @@ export default function App() {
     const timeout = setTimeout(() => {
       const scale = 1.0;
       explosionIdRef.current += 1;
-      setActiveExplosions((prev) => [
-        ...prev,
+      setCharacterExplosions([
         { row: charPos.row, col: charPos.col, frameIndex: 0, scale, id: explosionIdRef.current }
       ]);
       
@@ -715,8 +550,13 @@ export default function App() {
   }, [status, activeExplosions.length]);
 
   useEffect(() => {
+    if (status !== "lost" && characterExplosions.length > 0) {
+      setCharacterExplosions([]);
+    }
+  }, [status, characterExplosions.length]);
+
+  useEffect(() => {
     if (status !== "lost") return;
-    if (activeExplosions.length === 0 && explosionQueueRef.current.length === 0) return;
 
     // First 7 frames at 10 FPS (100ms), last 9 frames at 6 FPS (166.67ms)
     const frameInterval = 100; // Use constant interval, check frame in update
@@ -757,31 +597,35 @@ export default function App() {
         }
       }
 
-      setActiveExplosions((prev) => {
-        const scorchesToAdd: ScorchState[] = [];
-        
-        const updated = prev
-          .map((exp) => {
-            // Create scorch mark when explosion reaches frame 6 (only once)
-            if (exp.frameIndex === 6) {
-              scorchIdRef.current += 1;
-              scorchesToAdd.push({ row: exp.row, col: exp.col, scale: exp.scale, id: scorchIdRef.current });
-            }
-            return { ...exp, frameIndex: exp.frameIndex + 1 };
-          })
-          .filter((exp) => exp.frameIndex < 16);
-        
-        // Add scorch marks in batch to prevent duplicates
-        if (scorchesToAdd.length > 0) {
-          setScorchMarks((scorches) => [...scorches, ...scorchesToAdd]);
-        }
-        
-        return updated;
-      });
+      advanceExplosionFrames();
     }, frameInterval);
 
     return () => clearInterval(kaboomIntervalId);
   }, [status, gridSize, mineCount]);
+
+  useEffect(() => {
+    if (status !== "lost") return;
+
+    const characterIntervalId = setInterval(() => {
+      advanceCharacterExplosionFrames();
+    }, 100);
+
+    return () => clearInterval(characterIntervalId);
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "lost") return;
+
+    const watchdogId = setInterval(() => {
+      if (activeExplosions.length === 0) return;
+      const lastAdvance = lastExplosionAdvanceRef.current;
+      if (lastAdvance === 0 || Date.now() - lastAdvance > 220) {
+        advanceExplosionFrames();
+      }
+    }, 220);
+
+    return () => clearInterval(watchdogId);
+  }, [status, activeExplosions.length]);
 
   // Clear explosions when all are complete and queue is empty
   useEffect(() => {
@@ -795,7 +639,7 @@ export default function App() {
   // Trigger cheer animation when game is won and no animations are playing
   useEffect(() => {
     if (status !== "won") return;
-    if (isMoving || placingFlagDirection !== null) return;
+    if (isMoving || isJumping || placingFlagDirection !== null) return;
     
     setIsCheer(true);
     
@@ -804,7 +648,7 @@ export default function App() {
       whooshAudio.current.currentTime = 0;
       whooshAudio.current.play().catch(() => {});
     }
-  }, [status, isMoving, placingFlagDirection]);
+  }, [status, isMoving, isJumping, placingFlagDirection]);
 
   // Animation effect
   useEffect(() => {
@@ -888,18 +732,28 @@ export default function App() {
         if (!isChillWalk) {
           // Reveal tile at frame 7 for normal walk
           if (nextFrame === 7 && pendingCharPos) {
-            revealAt(pendingCharPos.row, pendingCharPos.col);
+            const chordIntent = pendingChordRef.current || chordHeldRef.current || pendingChordFromButtonRef.current || chordButtonActive;
+            revealAt(pendingCharPos.row, pendingCharPos.col, { chord: chordIntent });
           }
         }
 
         const totalFrames = isChillWalk && diagonalDirection === null ? 6 : 11;
         // Complete animation at final frame
         if (nextFrame >= totalFrames) {
+          if (pendingCharPos && isChillWalk) {
+            const chordIntent = pendingChordRef.current || chordHeldRef.current || pendingChordFromButtonRef.current || chordButtonActive;
+            if (chordIntent) {
+              chordRevealAt(pendingCharPos.row, pendingCharPos.col, pendingChordFromButtonRef.current);
+            }
+          }
+
           // Update character position after animation completes
           if (pendingCharPos) {
             setCharPos(pendingCharPos);
             setPendingCharPos(null);
           }
+          pendingChordRef.current = false;
+          pendingChordFromButtonRef.current = false;
           isMovingRef.current = false;
           setIsMoving(false);
           return 0;
@@ -910,6 +764,37 @@ export default function App() {
     
     return () => clearInterval(walkIntervalId);
   }, [isMoving, pendingCharPos, animationIntervals.walk, isChillWalk, diagonalDirection]);
+
+  // Jump animation effect
+  useEffect(() => {
+    if (!isJumping) return;
+
+    const jumpIntervalId = setInterval(() => {
+      setJumpFrameIndex((prev) => {
+        const nextFrame = prev + 1;
+        if (nextFrame === 6) {
+          if (chillWalkAudio.current) {
+            chillWalkAudio.current.currentTime = 0;
+            chillWalkAudio.current.play().catch(() => {});
+          }
+        }
+        if (nextFrame >= 10) {
+          const chordIntent = pendingJumpChordRef.current || chordHeldRef.current || pendingJumpFromButtonRef.current || chordButtonActive;
+          if (chordIntent) {
+            chordRevealAt(charPos.row, charPos.col, pendingJumpFromButtonRef.current);
+          }
+          pendingJumpChordRef.current = false;
+          pendingJumpFromButtonRef.current = false;
+          isJumpingRef.current = false;
+          setIsJumping(false);
+          return 0;
+        }
+        return nextFrame;
+      });
+    }, animationIntervals.jump);
+
+    return () => clearInterval(jumpIntervalId);
+  }, [isJumping, animationIntervals.jump, charPos]);
 
   // Place flag animation effect
   useEffect(() => {
@@ -950,12 +835,12 @@ export default function App() {
   // Trigger panic after loss once walk animation finishes
   useEffect(() => {
     if (!pendingLoss) return;
-    if (isMoving) return;
+    if (isMoving || isJumping) return;
 
     setIsPanic(true);
     setPanicFrameIndex(0);
     setPendingLoss(false);
-  }, [pendingLoss, isMoving]);
+  }, [pendingLoss, isMoving, isJumping]);
 
   // Panic animation effect
   useEffect(() => {
@@ -1004,7 +889,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = normalizeKey(e.key);
       
       // Always prevent default for arrow keys to stop page scrolling
       if (key.startsWith("arrow")) {
@@ -1035,7 +920,19 @@ export default function App() {
       if (isRebindingKey) return; // Disable game controls while rebinding
       if (!gameStarted) return; // Block input before game starts
       if (status !== "playing") return;
+
+      if (key === keyBindings.chord) {
+        e.preventDefault();
+        chordHeldRef.current = true;
+        if (isMovingRef.current) {
+          pendingChordRef.current = true;
+          pendingChordFromButtonRef.current = false;
+        }
+        return;
+      }
+
       if (isMoving || placingFlagDirection !== null || isIntro) return; // Block input during animations
+      if (isJumping) return;
 
       // Check if key is a flag key
       const isFlagKey = [keyBindings.flagUp, keyBindings.flagDown, keyBindings.flagLeft, keyBindings.flagRight].includes(key);
@@ -1056,6 +953,26 @@ export default function App() {
         next.add(key);
         pressedMovementKeysRef.current = next;
         setPressedMovementKeys(next);
+
+        if (next.has(keyBindings.up) && next.has(keyBindings.down)) {
+          pressedMovementKeysRef.current = new Set();
+          setPressedMovementKeys(new Set());
+          jumpInPlace({
+            chord: chordHeldRef.current || chordButtonActive,
+            chordFromButton: chordButtonActive
+          });
+          return;
+        }
+
+        if (next.has(keyBindings.left) && next.has(keyBindings.right)) {
+          pressedMovementKeysRef.current = new Set();
+          setPressedMovementKeys(new Set());
+          jumpInPlace({
+            chord: chordHeldRef.current || chordButtonActive,
+            chordFromButton: chordButtonActive
+          });
+          return;
+        }
       }
     };
 
@@ -1063,65 +980,26 @@ export default function App() {
       if (isRebindingKey) return; // Disable game controls while rebinding
       if (!gameStarted) return; // Block input before game starts
       if (isIntro) return;
-      const key = e.key.toLowerCase();
+      const key = normalizeKey(e.key);
+
+      if (key === keyBindings.chord) {
+        chordHeldRef.current = false;
+        return;
+      }
       
       // Handle flag key release
       const isFlagKey = [keyBindings.flagUp, keyBindings.flagDown, keyBindings.flagLeft, keyBindings.flagRight].includes(key);
       if (isFlagKey) {
         setPressedArrows((prev) => {
           const current = new Set(prev);
-          // Use current (including released key) to determine direction
-          const up = current.has(keyBindings.flagUp);
-          const down = current.has(keyBindings.flagDown);
-          const left = current.has(keyBindings.flagLeft);
-          const right = current.has(keyBindings.flagRight);
-
-          let dr = 0;
-          let dc = 0;
-          let isDiagonal = false;
-          let isSingle = false;
-
-          if (up && right) {
-            dr = -1;
-            dc = 1;
-            isDiagonal = true;
-          } else if (up && left) {
-            dr = -1;
-            dc = -1;
-            isDiagonal = true;
-          } else if (down && right) {
-            dr = 1;
-            dc = 1;
-            isDiagonal = true;
-          } else if (down && left) {
-            dr = 1;
-            dc = -1;
-            isDiagonal = true;
-          } else if (up) {
-            dr = -1;
-            dc = 0;
-            isSingle = current.size === 1;
-          } else if (down) {
-            dr = 1;
-            dc = 0;
-            isSingle = current.size === 1;
-          } else if (left) {
-            dr = 0;
-            dc = -1;
-            isSingle = current.size === 1;
-          } else if (right) {
-            dr = 0;
-            dc = 1;
-            isSingle = current.size === 1;
-          }
-
-          if (isDiagonal && (dr !== 0 || dc !== 0)) {
-            toggleFlagAt(charPos.row + dr, charPos.col + dc);
+          const direction = resolveFlagDirection(current, keyBindings);
+          if (direction.isDiagonal && (direction.dr !== 0 || direction.dc !== 0)) {
+            toggleFlagAt(charPos.row + direction.dr, charPos.col + direction.dc);
             return new Set();
           }
 
-          if (isSingle && (dr !== 0 || dc !== 0)) {
-            toggleFlagAt(charPos.row + dr, charPos.col + dc);
+          if (direction.isSingle && (direction.dr !== 0 || direction.dc !== 0)) {
+            toggleFlagAt(charPos.row + direction.dr, charPos.col + direction.dc);
           }
 
           current.delete(key);
@@ -1134,63 +1012,23 @@ export default function App() {
       const isMovementKey = [keyBindings.up, keyBindings.down, keyBindings.left, keyBindings.right].includes(key);
       if (isMovementKey) {
         const current = new Set(pressedMovementKeysRef.current);
-        // Use current (including released key) to determine direction
-        const up = current.has(keyBindings.up);
-        const down = current.has(keyBindings.down);
-        const left = current.has(keyBindings.left);
-        const right = current.has(keyBindings.right);
+        const direction = resolveMovementDirection(current, keyBindings);
 
-        let dr = 0;
-        let dc = 0;
-        let isDiagonal = false;
-        let isSingle = false;
-
-        if (up && right) {
-          dr = -1;
-          dc = 1;
-          isDiagonal = true;
-        } else if (up && left) {
-          dr = -1;
-          dc = -1;
-          isDiagonal = true;
-        } else if (down && right) {
-          dr = 1;
-          dc = 1;
-          isDiagonal = true;
-        } else if (down && left) {
-          dr = 1;
-          dc = -1;
-          isDiagonal = true;
-        } else if (up) {
-          dr = -1;
-          dc = 0;
-          isSingle = current.size === 1;
-        } else if (down) {
-          dr = 1;
-          dc = 0;
-          isSingle = current.size === 1;
-        } else if (left) {
-          dr = 0;
-          dc = -1;
-          isSingle = current.size === 1;
-        } else if (right) {
-          dr = 0;
-          dc = 1;
-          isSingle = current.size === 1;
-        }
-
-        if (isDiagonal && (dr !== 0 || dc !== 0)) {
-          moveCharacter(dr, dc, 
-            dc === 1 ? (dr === -1 ? "TopRight" : "BottomRight") : 
-            (dr === -1 ? "TopLeft" : "BottomLeft")
-          );
+        if (direction.isDiagonal && (direction.dr !== 0 || direction.dc !== 0)) {
+          moveCharacter(direction.dr, direction.dc, direction.diagonal, {
+            chord: chordHeldRef.current || chordButtonActive,
+            chordFromButton: chordButtonActive
+          });
           pressedMovementKeysRef.current = new Set();
           setPressedMovementKeys(new Set());
           return;
         }
 
-        if (isSingle && (dr !== 0 || dc !== 0)) {
-          moveCharacter(dr, dc, null);
+        if (direction.isSingle && (direction.dr !== 0 || direction.dc !== 0)) {
+          moveCharacter(direction.dr, direction.dc, null, {
+            chord: chordHeldRef.current || chordButtonActive,
+            chordFromButton: chordButtonActive
+          });
         }
 
         current.delete(key);
@@ -1205,7 +1043,7 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, placingFlagDirection, isIntro, keyBindings, isRebindingKey, mineCount]);
+  }, [gridSize, status, localMatrix, charPos, remainingMines, gameStarted, isMoving, isJumping, placingFlagDirection, isIntro, keyBindings, isRebindingKey, mineCount]);
 
   // Handle key rebinding
   useEffect(() => {
@@ -1213,24 +1051,25 @@ export default function App() {
 
     const handleRebindKey = (e: KeyboardEvent) => {
       e.preventDefault();
-      const newKey = e.key.toLowerCase();
+      const newKey = normalizeKey(e.key);
       
       // Ignore modifier keys
       if (["control", "alt", "shift", "meta"].includes(newKey)) return;
       
       // Update the key binding and remove any duplicate keys
-      setKeyBindings((prev: any) => {
-        const updated = { ...prev };
+      setKeyBindings((prev: KeyBindings) => {
+        const updated: KeyBindings = { ...prev };
+        const bindingToSet = isRebindingKey as keyof KeyBindings;
         
         // First, find and clear any existing binding with this key
-        for (const [bindingKey, bindingValue] of Object.entries(updated)) {
-          if (bindingValue === newKey && bindingKey !== isRebindingKey) {
-            updated[bindingKey] = ""; // Clear the old binding
+        (Object.keys(updated) as Array<keyof KeyBindings>).forEach((bindingKey) => {
+          if (updated[bindingKey] === newKey && bindingKey !== bindingToSet) {
+            updated[bindingKey] = "";
           }
-        }
+        });
         
         // Then set the new binding
-        updated[isRebindingKey] = newKey;
+        updated[bindingToSet] = newKey;
         
         localStorage.setItem("minestickerKeyBindings", JSON.stringify(updated));
         return updated;
@@ -1251,8 +1090,11 @@ export default function App() {
   const clearAllAnimations = () => {
     setIsMoving(false);
     isMovingRef.current = false;
+    setIsJumping(false);
+    isJumpingRef.current = false;
     skipNextAutoSaveRef.current = false;
     setWalkFrameIndex(0);
+    setJumpFrameIndex(0);
     setIsChillWalk(false);
     setPendingCharPos(null);
     setPlacingFlagDirection(null);
@@ -1269,6 +1111,7 @@ export default function App() {
     setIntroFrameIndex(0);
     setIntroTargetPos(null);
     setActiveExplosions([]);
+    setCharacterExplosions([]);
     setScorchMarks([]);
     explosionQueueRef.current = [];
     pressedMovementKeysRef.current = new Set();
@@ -1278,6 +1121,15 @@ export default function App() {
     lastVerticalDirectionRef.current = null;
     setShouldMirrorWalk(false);
     lastWasVerticalMirroredRef.current = false;
+    chordHeldRef.current = false;
+    pendingChordRef.current = false;
+    pendingChordFromButtonRef.current = false;
+    pendingJumpChordRef.current = false;
+    pendingJumpFromButtonRef.current = false;
+    if (chordFailTimeoutRef.current !== null) {
+      clearTimeout(chordFailTimeoutRef.current);
+      chordFailTimeoutRef.current = null;
+    }
   };
 
   const setDifficulty = (rows: number, cols: number, mines: number, type: "easy" | "normal" | "hard" | "custom" = "easy") => {
@@ -1318,18 +1170,11 @@ export default function App() {
     localStorage.removeItem("minestickerKeyButtonScale");
     localStorage.removeItem("minestickerKeyButtonScaleCollapsed");
     localStorage.removeItem("minestickerCustomModeCollapsed");
+    localStorage.removeItem("minestickerChordButtonActive");
+    localStorage.removeItem("minestickerChordButtonMode");
     
     // Reset all state to defaults
-    setKeyBindings({
-      up: "w",
-      down: "s",
-      left: "a",
-      right: "d",
-      flagUp: "arrowup",
-      flagDown: "arrowdown",
-      flagLeft: "arrowleft",
-      flagRight: "arrowright"
-    });
+    setKeyBindings({ ...DEFAULT_KEY_BINDINGS });
     setAnimationSpeed(30);
     setSoundVolume(70);
     setDarkMode(false);
@@ -1340,6 +1185,8 @@ export default function App() {
     setIsKeyButtonScaleCollapsed(true);
     setIsCustomModeCollapsed(true);
     setKeyButtonScale(0.5);
+    setChordButtonActive(false);
+    setChordButtonMode("toggle");
     setCustomWidth(16);
     setCustomHeight(16);
     setCustomMineDensity(15);
@@ -1378,6 +1225,11 @@ export default function App() {
     return DIAGONAL_COORDS[`${prefix}${walkFrameIndex}`];
   }, [diagonalDirection, walkFrameIndex]);
 
+  const getJumpFrame = useMemo(() => {
+    const frameIndex = jumpFrameIndex % 10;
+    return JUMP_COORDS[`jump${frameIndex}`];
+  }, [jumpFrameIndex]);
+
   const getChillWalkFrame = useMemo(() => {
     const directionMap: Record<string, string> = {
       "Up": "chillWalkUp",
@@ -1414,6 +1266,12 @@ export default function App() {
         coords: getIntroFrame
       };
     }
+    if (isJumping) {
+      return {
+        spriteSheet: JUMP_SPRITE_SHEET,
+        coords: getJumpFrame
+      };
+    }
     if (isDead) {
       return {
         spriteSheet: DEAD_SPRITE_SHEET,
@@ -1447,7 +1305,7 @@ export default function App() {
         coords: getIdleFrame
       };
     }
-  }, [isIntro, isDead, isPanic, placingFlagDirection, diagonalDirection, isMoving, isChillWalk, getIntroFrame, getPanicFrame, getPlaceFlagFrame, getDiagonalWalkFrame, getChillWalkFrame, getWalkFrame, getIdleFrame]);
+  }, [isIntro, isJumping, isDead, isPanic, placingFlagDirection, diagonalDirection, isMoving, isChillWalk, getIntroFrame, getJumpFrame, getPanicFrame, getPlaceFlagFrame, getDiagonalWalkFrame, getChillWalkFrame, getWalkFrame, getIdleFrame]);
 
   const renderThreeDigitNumber = (value: number) => {
     const digits = Math.min(Math.max(value, 0), 999).toString().padStart(3, '0').split('');
@@ -1481,9 +1339,14 @@ export default function App() {
     return FACE_COORDS.face1;
   }, [isFacePressed, status]);
 
-  const moveCharacter = (dr: number, dc: number, diagonal: "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null = null) => {
+  const moveCharacter = (
+    dr: number,
+    dc: number,
+    diagonal: "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null = null,
+    options?: { chord?: boolean; chordFromButton?: boolean }
+  ) => {
     if (status !== "playing" || isIntro) return;
-    if (isMovingRef.current) return;
+    if (isMovingRef.current || isJumpingRef.current) return;
     
     // Calculate new position
     const newRow = charPos.row + dr;
@@ -1538,6 +1401,8 @@ export default function App() {
     isMovingRef.current = true;
     setIsMoving(true);
     setIsChillWalk(shouldChillWalk);
+    pendingChordRef.current = options?.chord ?? chordHeldRef.current;
+    pendingChordFromButtonRef.current = options?.chordFromButton ?? false;
     setPendingCharPos({ row: newRow, col: newCol });
     
     // Play initial walk sound (only for cardinal movements, diagonal handles its own timing)
@@ -1556,16 +1421,66 @@ export default function App() {
     }
   };
 
+  const jumpInPlace = (options?: { chord?: boolean; chordFromButton?: boolean }) => {
+    if (status !== "playing" || isIntro) return;
+    if (isMovingRef.current || isJumpingRef.current) return;
+
+    setJumpFrameIndex(0);
+    isJumpingRef.current = true;
+    setIsJumping(true);
+    pendingJumpChordRef.current = options?.chord ?? chordHeldRef.current;
+    pendingJumpFromButtonRef.current = options?.chordFromButton ?? false;
+  };
+
   const KEY_BUTTON_SCALE = keyButtonScale;
   const KEY_BUTTON_BASE = 50;
   const KEY_BUTTON_SIZE = Math.round(KEY_BUTTON_BASE * KEY_BUTTON_SCALE);
   const KEY_SPRITE_SHEET_WIDTH = 400;
   const KEY_SPRITE_SHEET_HEIGHT = 100;
 
+  const handleMoveButton = (
+    keyId: string,
+    dr: number,
+    dc: number,
+    diagonal: "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | null = null
+  ) => {
+    const now = Date.now();
+    const lastTap = lastMoveTapRef.current[keyId] ?? 0;
+    const isDoubleTap = now - lastTap <= CHORD_DOUBLE_TAP_MS;
+    lastMoveTapRef.current[keyId] = now;
+
+    if (isMovingRef.current) {
+      if (chordButtonActive) {
+        pendingChordRef.current = true;
+        pendingChordFromButtonRef.current = true;
+      } else if (isDoubleTap) {
+        pendingChordRef.current = true;
+        pendingChordFromButtonRef.current = false;
+      }
+      return;
+    }
+
+    const chordFromButton = chordButtonActive;
+    const chordForMove = chordFromButton || isDoubleTap || chordHeldRef.current;
+
+    moveCharacter(dr, dc, diagonal, { chord: chordForMove, chordFromButton });
+  };
+
+  const handleJumpButton = () => {
+    const chordFromButton = chordButtonActive;
+    const chordForJump = chordFromButton || chordHeldRef.current;
+    jumpInPlace({ chord: chordForJump, chordFromButton });
+  };
+
+  const toggleChordButton = () => {
+    setChordButtonActive((prev: boolean) => !prev);
+  };
+
   const renderKeyButton = (
     coords: { x1: number; y1: number; x2: number; y2: number },
     onClick: () => void,
-    ariaLabel: string
+    ariaLabel: string,
+    options?: { allowDuringMove?: boolean }
   ) => {
     const width = coords.x2 - coords.x1 + 1;
     const height = coords.y2 - coords.y1 + 1;
@@ -1576,7 +1491,8 @@ export default function App() {
         type="button"
         onClick={() => {
           // Block input during animations or before game starts
-          if (!gameStarted || isMoving || placingFlagDirection !== null) return;
+          if (!gameStarted || placingFlagDirection !== null) return;
+          if ((isMoving || isJumping) && !options?.allowDuringMove) return;
           onClick();
         }}
         aria-label={ariaLabel}
@@ -1629,7 +1545,7 @@ export default function App() {
       setIsRemovingFlag(isFlagPresent);
     }
 
-    setLocalMatrix((prev) => {
+    setLocalMatrix((prev: Matrix<Tile>) => {
       const next = cloneMatrix(prev);
       const tile = next.get(row, col);
       if (!tile || tile.isOpen) return prev;
@@ -1645,7 +1561,7 @@ export default function App() {
     if (!gameStarted) {
       // Start game on first click
       // First, clear mines from the starter area
-      setLocalMatrix((prev) => {
+      setLocalMatrix((prev: Matrix<Tile>) => {
         const next = cloneMatrix(prev);
         clearStarterArea(next, row, col);
         skipNextAutoSaveRef.current = true;
@@ -1675,7 +1591,7 @@ export default function App() {
     const colDist = Math.abs(col - charPos.col);
     if (rowDist > 1 || colDist > 1) return;
 
-    setLocalMatrix((prev) => {
+    setLocalMatrix((prev: Matrix<Tile>) => {
       const next = cloneMatrix(prev);
       const tile = next.get(row, col);
       if (!tile || tile.isOpen) return prev;
@@ -1689,11 +1605,19 @@ export default function App() {
     });
   };
 
-  const revealAt = (row: number, col: number) => {
+  const revealAt = (row: number, col: number, options?: { chord?: boolean }) => {
     if (status !== "playing") return;
     if (firstMove) setFirstMove(false);
 
-    setLocalMatrix((prev) => {
+    const shouldChord = options?.chord ?? false;
+    const handleChordSuccess = (didChord: boolean) => {
+      if (!didChord || !(pendingChordFromButtonRef.current || chordButtonActive)) return;
+      if (chordButtonMode !== "one-shot") return;
+      setChordButtonActive(false);
+      localStorage.setItem("minestickerChordButtonActive", JSON.stringify(false));
+    };
+
+    setLocalMatrix((prev: Matrix<Tile>) => {
       const next = cloneMatrix(prev);
       const tile = next.get(row, col);
       if (!tile || tile.isOpen || tile.isFlagged) return prev;
@@ -1711,6 +1635,27 @@ export default function App() {
       }
 
       floodReveal(next, row, col);
+
+      if (shouldChord) {
+        const chordResult = applyChordReveal(next, row, col);
+        handleChordSuccess(chordResult.didChord);
+        if (chordResult.didChord && chordResult.revealedCount > 0 && !chordResult.steppedMine) {
+          if (stepOnBlockAudio.current) {
+            stepOnBlockAudio.current.currentTime = 0;
+            stepOnBlockAudio.current.play().catch(() => {});
+          }
+        }
+        if (!chordResult.didChord) {
+          const flashedPositions = applyChordFailIndicator(next, row, col);
+          scheduleChordFailReset(flashedPositions);
+        }
+        if (chordResult.steppedMine) {
+          setStatus("lost");
+          setPendingLoss(true);
+          setSteppedMine(chordResult.steppedMine);
+          return next;
+        }
+      }
 
       if (checkWin(next, mineCount)) {
         setStatus("won");
@@ -1780,6 +1725,135 @@ export default function App() {
       .neighbors(row, col)
       .reduce((acc, [r, c]) => (matrix.get(r, c)?.isMine ? acc + 1 : acc), 0);
 
+  const countAdjacentFlags = (matrix: Matrix<Tile>, row: number, col: number) =>
+    matrix
+      .neighbors(row, col)
+      .reduce((acc, [r, c]) => (matrix.get(r, c)?.isFlagged ? acc + 1 : acc), 0);
+
+  const applyChordReveal = (matrix: Matrix<Tile>, row: number, col: number) => {
+    const center = matrix.get(row, col);
+    if (!center || !center.isOpen || center.isMine) return { didChord: false, revealedCount: 0 };
+
+    const adjacentMines = countAdjacentMines(matrix, row, col);
+    const adjacentFlags = countAdjacentFlags(matrix, row, col);
+    if (adjacentMines !== adjacentFlags) return { didChord: false, revealedCount: 0 };
+
+    let stepped: { row: number; col: number } | null = null;
+    for (const [nr, nc] of matrix.neighbors(row, col)) {
+      const neighbor = matrix.get(nr, nc);
+      if (!neighbor || neighbor.isOpen || neighbor.isFlagged) continue;
+      if (neighbor.isMine) {
+        stepped = { row: nr, col: nc };
+        break;
+      }
+    }
+
+    if (stepped) {
+      revealAllMines(matrix, stepped.row, stepped.col);
+      return { didChord: true, steppedMine: stepped, revealedCount: 0 };
+    }
+
+    let revealedCount = 0;
+    matrix.neighbors(row, col).forEach(([nr, nc]) => {
+      const neighbor = matrix.get(nr, nc);
+      if (!neighbor || neighbor.isOpen || neighbor.isFlagged || neighbor.isMine) return;
+      floodReveal(matrix, nr, nc);
+      revealedCount += 1;
+    });
+
+    return { didChord: true, revealedCount };
+  };
+
+  const applyChordFailIndicator = (matrix: Matrix<Tile>, row: number, col: number) => {
+    const flashed: Array<[number, number]> = [];
+    for (let r = row - 1; r <= row + 1; r += 1) {
+      for (let c = col - 1; c <= col + 1; c += 1) {
+        if (!matrix.inBounds(r, c)) continue;
+        const tile = matrix.get(r, c);
+        if (!tile || tile.isOpen || tile.isFlagged) continue;
+        tile.setTexture("tile9");
+        flashed.push([r, c]);
+      }
+    }
+    if (flashed.length > 0 && stepOnBlockAudio.current) {
+      stepOnBlockAudio.current.currentTime = 0;
+      stepOnBlockAudio.current.play().catch(() => {});
+    }
+    return flashed;
+  };
+
+  const scheduleChordFailReset = (positions: Array<[number, number]>) => {
+    if (positions.length === 0) return;
+    if (chordFailTimeoutRef.current !== null) {
+      clearTimeout(chordFailTimeoutRef.current);
+    }
+
+    chordFailTimeoutRef.current = window.setTimeout(() => {
+      setLocalMatrix((prev: Matrix<Tile>) => {
+        const next = cloneMatrix(prev);
+        let changed = false;
+        positions.forEach(([r, c]) => {
+          const tile = next.get(r, c);
+          if (!tile || tile.isOpen || tile.isFlagged) return;
+          if (tile.texture !== "tile9") return;
+          tile.setTexture("tile0");
+          changed = true;
+        });
+        return changed ? next : prev;
+      });
+      chordFailTimeoutRef.current = null;
+    }, CHORD_FAIL_FLASH_MS);
+  };
+
+  const chordRevealAt = (row: number, col: number, chordFromButton = false) => {
+    if (status !== "playing") return;
+
+    setLocalMatrix((prev: Matrix<Tile>) => {
+      const center = prev.get(row, col);
+      if (!center || center.isMine) return prev;
+      if (!center.isOpen) {
+        const next = cloneMatrix(prev);
+        const flashedPositions = applyChordFailIndicator(next, row, col);
+        scheduleChordFailReset(flashedPositions);
+        return flashedPositions.length > 0 ? next : prev;
+      }
+
+      const adjacentMines = countAdjacentMines(prev, row, col);
+      const adjacentFlags = countAdjacentFlags(prev, row, col);
+      if (adjacentMines !== adjacentFlags) {
+        const next = cloneMatrix(prev);
+        const flashedPositions = applyChordFailIndicator(next, row, col);
+        scheduleChordFailReset(flashedPositions);
+        return flashedPositions.length > 0 ? next : prev;
+      }
+
+      const next = cloneMatrix(prev);
+      const chordResult = applyChordReveal(next, row, col);
+      if (chordResult.didChord && chordResult.revealedCount > 0 && !chordResult.steppedMine) {
+        if (stepOnBlockAudio.current) {
+          stepOnBlockAudio.current.currentTime = 0;
+          stepOnBlockAudio.current.play().catch(() => {});
+        }
+      }
+      if (chordResult.didChord && chordButtonMode === "one-shot" && (chordFromButton || chordButtonActive)) {
+        setChordButtonActive(false);
+        localStorage.setItem("minestickerChordButtonActive", JSON.stringify(false));
+      }
+      if (chordResult.steppedMine) {
+        setStatus("lost");
+        setPendingLoss(true);
+        setSteppedMine(chordResult.steppedMine);
+        return next;
+      }
+
+      if (checkWin(next, mineCount)) {
+        setStatus("won");
+      }
+
+      return next;
+    });
+  };
+
   const floodReveal = (matrix: Matrix<Tile>, row: number, col: number) => {
     const stack: Array<[number, number]> = [[row, col]];
     while (stack.length) {
@@ -1830,71 +1904,12 @@ export default function App() {
       </section> */}
 
       <section style={{ marginTop: 16, overflow: "visible" }}>
-        <div
-          onClick={() => setIsInstructionsCollapsed(!isInstructionsCollapsed)}
-          style={{
-            cursor: "pointer",
-            userSelect: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: isInstructionsCollapsed ? 0 : 12
-          }}
-        >
-          <span style={{ fontSize: 18 }}>
-            {isInstructionsCollapsed ? "▶" : "▼"}
-          </span>
-          <h2 style={{ margin: 0, display: "inline" }}>Minesweeper (But with The Dark Lord)</h2>
-        </div>
-        <div
-          style={{
-            maxHeight: isInstructionsCollapsed ? 0 : "1000px",
-            overflow: "hidden",
-            transition: "max-height 0.3s ease-in-out",
-            marginBottom: isInstructionsCollapsed ? 0 : 12
-          }}
-        >
-          <div className="p-4 bg-gray-900 text-white rounded-lg">
-            <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Version 0.3.1 - February 6th 2026 (GMT +7) </p>
-        <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Inspired by Animator vs Animation 3 - Alan Becker</p>
-          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Don't know how to play Minesweeper?&nbsp;
-                <a href="https://www.spriters-resource.com/pc_computer/minesweeper/asset/19849/" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                  Here's how!
-                </a></p>
-          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Please select any tile to start the game!</p>
-          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-          Use WASD to move around, and press arrow keys to place flags (two arrow key can be pressed together for diagonal flags)!</p>
-          <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-           Use the on-screen WASD and arrow keys if you're on a touch device!</p>
-           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-           To Restart the game, press the face button above the mine counter or Enter! You can randomize a start with Enter!</p>
-           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-           Encountered bugs? Hard Reset the game:&nbsp;  
-        <button 
-              type="button" 
-              onClick={() => {
-                if (window.confirm("This will reset ALL data including game progress, settings, and keybindings. Continue?")) {
-                  hardReset();
-                }
-              }}
-              style={{
-                backgroundColor: "#ff4444",
-                color: "white",
-                fontWeight: "bold",
-                border: "2px solid #cc0000",
-                padding: "4px 12px",
-                cursor: "pointer",
-                borderRadius: "4px"
-              }}
-            >
-              Reset
-            </button></p>
-          </div>
-        </div>
+        <HeaderSection
+          isInstructionsCollapsed={isInstructionsCollapsed}
+          darkMode={darkMode}
+          onToggleInstructions={() => setIsInstructionsCollapsed(!isInstructionsCollapsed)}
+          onHardReset={hardReset}
+        />
         <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button 
             type="button" 
@@ -2222,7 +2237,7 @@ export default function App() {
                     }
                     
                     // First, clear mines from the starter area
-                    setLocalMatrix((prev) => {
+                    setLocalMatrix((prev: Matrix<Tile>) => {
                       const next = cloneMatrix(prev);
                       clearStarterArea(next, row, col);
                       skipNextAutoSaveRef.current = true;
@@ -2255,114 +2270,25 @@ export default function App() {
               />
             );
           })}
-          <div style={{ position: "absolute", top: 0, left: 0, width: gridSize.cols * 16, height: gridSize.rows * 16, overflow: "hidden", pointerEvents: "none" }}>
-          {scorchMarks.map((scorch) => {
-            // Position scorch at tile center, same as explosions
-            const scorchTop = scorch.row * GRID_SIZE - (SCORCH_FRAME_SIZE - 16) / 2;
-            const scorchLeft = scorch.col * GRID_SIZE - (SCORCH_FRAME_SIZE - 16) / 2;
-            
-            return (
-              <div
-                key={`scorch-${scorch.id}`}
-                style={{
-                  position: "absolute",
-                  top: scorchTop,
-                  left: scorchLeft,
-                  width: SCORCH_FRAME_SIZE,
-                  height: SCORCH_FRAME_SIZE,
-                  backgroundImage: `url(${SCORCH_SPRITE_SHEET})`,
-                  backgroundPosition: `-${SCORCH_COORDS.x1}px -${SCORCH_COORDS.y1}px`,
-                  backgroundSize: "auto",
-                  pointerEvents: "none",
-                  transform: `scale(${scorch.scale})`,
-                  transformOrigin: "center",
-                  zIndex: 2,
-                  willChange: "transform"
-                }}
-              />
-            );
-          })}
-          </div>
-          {activeExplosions.map((explosion) => {
-            const kaboomCoords = KABOOM_COORDS[`kaboom${explosion.frameIndex}`];
-            const explosionTop = explosion.row * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2;
-            const explosionLeft = explosion.col * GRID_SIZE - (KABOOM_FRAME_SIZE - 16) / 2;
-            
-            return (
-              <div
-                key={`explosion-${explosion.id}`}
-                style={{
-                  position: "absolute",
-                  top: explosionTop,
-                  left: explosionLeft,
-                  width: KABOOM_FRAME_SIZE,
-                  height: KABOOM_FRAME_SIZE,
-                  backgroundImage: `url(${KABOOM_SPRITE_SHEET})`,
-                  backgroundPosition: `-${kaboomCoords.x1}px -${kaboomCoords.y1}px`,
-                  backgroundSize: "auto",
-                  pointerEvents: "none",
-                  transform: `scale(${explosion.scale})`,
-                  transformOrigin: "center",
-                  zIndex: 11,
-                  willChange: "transform"
-                }}
-              />
-            );
-          })}
-          {isIntro && (
-            <div
-              style={{
-                position: "absolute",
-                top: (introFrameIndex < 4
-                  ? (introTargetPos ?? charPos).row * GRID_SIZE - (112 - 16) / 2 + (-40 + introFrameIndex * 10)
-                  : (introTargetPos ?? charPos).row * GRID_SIZE - (112 - 16) / 2),
-                left: (introFrameIndex < 4
-                  ? (introTargetPos ?? charPos).col * GRID_SIZE - (112 - 16) / 2 + (-GRID_SIZE * ((introTargetPos ?? charPos).col + 2) + introFrameIndex * (GRID_SIZE * ((introTargetPos ?? charPos).col + 2))/4)
-                  : (introTargetPos ?? charPos).col * GRID_SIZE - (112 - 16) / 2),
-                width: 112,
-                height: 112,
-                backgroundImage: `url(${INTRO_SPRITE_SHEET})`,
-                backgroundPosition: `-${getIntroFrame.x1}px -${getIntroFrame.y1}px`,
-                backgroundSize: "auto",
-                pointerEvents: "none",
-                zIndex: 10
-              }}
-            />
-          )}
-          {gameStarted && !isCheer && !isIntro && (
-            <div
-              style={{
-                position: "absolute",
-                top: charPos.row * GRID_SIZE - (112 - 16) / 2,
-                left: charPos.col * GRID_SIZE - (112 - 16) / 2,
-                width: 112,
-                height: 112,
-                backgroundImage: `url(${getCurrentCharacterSprite.spriteSheet})`,
-                backgroundPosition: `-${getCurrentCharacterSprite.coords.x1}px -${getCurrentCharacterSprite.coords.y1}px`,
-                backgroundSize: "auto",
-                pointerEvents: "none",
-                transform: isMoving && shouldMirrorWalk ? "scaleX(-1)" : "none",
-                transformOrigin: "center",
-                zIndex: 10
-              }}
-            />
-          )}
-          {isCheer && (
-            <div
-              style={{
-                position: "absolute",
-                top: charPos.row * GRID_SIZE - (112 - 16) / 2,
-                left: charPos.col * GRID_SIZE - (112 - 16) / 2,
-                width: 112,
-                height: 112,
-                backgroundImage: `url(${CHEER_SPRITE_SHEET})`,
-                backgroundPosition: `-${CHEER_COORDS[`cheer${cheerFrameIndex}`].x1}px -${CHEER_COORDS[`cheer${cheerFrameIndex}`].y1}px`,
-                backgroundSize: "auto",
-                pointerEvents: "none",
-                zIndex: 10
-              }}
-            />
-          )}
+          <GameAnimations
+            gridSize={gridSize}
+            charPos={charPos}
+            activeExplosions={[...activeExplosions, ...characterExplosions]}
+            scorchMarks={scorchMarks}
+            isIntro={isIntro}
+            introFrameIndex={introFrameIndex}
+            introTargetPos={introTargetPos}
+            introFrameCoords={getIntroFrame}
+            gameStarted={gameStarted}
+            isCheer={isCheer}
+            cheerFrameIndex={cheerFrameIndex}
+            currentCharacterSprite={getCurrentCharacterSprite}
+            isMoving={isMoving}
+            shouldMirrorWalk={shouldMirrorWalk}
+            gridSizePx={GRID_SIZE}
+            kaboomFrameSize={KABOOM_FRAME_SIZE}
+            scorchFrameSize={SCORCH_FRAME_SIZE}
+          />
           
           </div>
         </div>
@@ -2384,16 +2310,32 @@ export default function App() {
                 gap: 4
               }}
             >
-              {renderKeyButton(KEY_COORDS.arrowUpLeft, () => moveCharacter(-1, -1, "TopLeft"), "Move up-left")}
-              {renderKeyButton(KEY_COORDS.keyW, () => moveCharacter(-1, 0), "Move up")}
-              {renderKeyButton(KEY_COORDS.arrowUpRight, () => moveCharacter(-1, 1, "TopRight"), "Move up-right")}
-              {renderKeyButton(KEY_COORDS.keyA, () => moveCharacter(0, -1), "Move left")}
-              <div style={{ width: KEY_BUTTON_SIZE, height: KEY_BUTTON_SIZE }} />
-              {renderKeyButton(KEY_COORDS.keyD, () => moveCharacter(0, 1), "Move right")}
-              {renderKeyButton(KEY_COORDS.arrowDownLeft, () => moveCharacter(1, -1, "BottomLeft"), "Move down-left")}
-              {renderKeyButton(KEY_COORDS.keyS, () => moveCharacter(1, 0), "Move down")}
-              {renderKeyButton(KEY_COORDS.arrowDownRight, () => moveCharacter(1, 1, "BottomRight"), "Move down-right")}
+              {renderKeyButton(KEY_COORDS.arrowUpLeft, () => handleMoveButton("moveUpLeft", -1, -1, "TopLeft"), "Move up-left", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.keyW, () => handleMoveButton("moveUp", -1, 0), "Move up", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.arrowUpRight, () => handleMoveButton("moveUpRight", -1, 1, "TopRight"), "Move up-right", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.keyA, () => handleMoveButton("moveLeft", 0, -1), "Move left", { allowDuringMove: true })}
+              {renderKeyButton(
+                KEY_COORDS.jump,
+                () => {
+                  if (!gameStarted || placingFlagDirection !== null || isIntro) return;
+                  if (isMoving || isJumping) return;
+                  handleJumpButton();
+                },
+                "Jump in place"
+              )}
+              {renderKeyButton(KEY_COORDS.keyD, () => handleMoveButton("moveRight", 0, 1), "Move right", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.arrowDownLeft, () => handleMoveButton("moveDownLeft", 1, -1, "BottomLeft"), "Move down-left", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.keyS, () => handleMoveButton("moveDown", 1, 0), "Move down", { allowDuringMove: true })}
+              {renderKeyButton(KEY_COORDS.arrowDownRight, () => handleMoveButton("moveDownRight", 1, 1, "BottomRight"), "Move down-right", { allowDuringMove: true })}
             </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {renderKeyButton(
+              chordButtonActive ? KEY_COORDS.chordOn : KEY_COORDS.chordOff,
+              toggleChordButton,
+              chordButtonActive ? "Chording on" : "Chording off"
+            )}
           </div>
 
           <div>
@@ -2630,10 +2572,10 @@ export default function App() {
               <div>
                 <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Movement (WASD)</div>
                 {[
-                  { label: "Move Up", key: "up", display: keyBindings.up.toUpperCase() },
-                  { label: "Move Left", key: "left", display: keyBindings.left.toUpperCase() },
-                  { label: "Move Down", key: "down", display: keyBindings.down.toUpperCase() },
-                  { label: "Move Right", key: "right", display: keyBindings.right.toUpperCase() }
+                  { label: "Move Up", key: "up", display: formatKeyLabel(keyBindings.up) },
+                  { label: "Move Left", key: "left", display: formatKeyLabel(keyBindings.left) },
+                  { label: "Move Down", key: "down", display: formatKeyLabel(keyBindings.down) },
+                  { label: "Move Right", key: "right", display: formatKeyLabel(keyBindings.right) }
                 ].map((binding) => (
                   <div key={binding.key} style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 11, marginBottom: 3, color: darkMode ? "#CCCCCC" : "#555" }}>{binding.label}</div>
@@ -2661,10 +2603,10 @@ export default function App() {
             <div>
               <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Flag Keys (Arrows)</div>
               {[
-                { label: "Flag Up", key: "flagUp", display: keyBindings.flagUp.toUpperCase() },
-                { label: "Flag Left", key: "flagLeft", display: keyBindings.flagLeft.toUpperCase() },
-                { label: "Flag Down", key: "flagDown", display: keyBindings.flagDown.toUpperCase() },
-                { label: "Flag Right", key: "flagRight", display: keyBindings.flagRight.toUpperCase() }
+                { label: "Flag Up", key: "flagUp", display: formatKeyLabel(keyBindings.flagUp) },
+                { label: "Flag Left", key: "flagLeft", display: formatKeyLabel(keyBindings.flagLeft) },
+                { label: "Flag Down", key: "flagDown", display: formatKeyLabel(keyBindings.flagDown) },
+                { label: "Flag Right", key: "flagRight", display: formatKeyLabel(keyBindings.flagRight) }
               ].map((binding) => (
                 <div key={binding.key} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 11, marginBottom: 3, color: darkMode ? "#CCCCCC" : "#555" }}>{binding.label}</div>
@@ -2687,20 +2629,77 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Chording</div>
+              {[{ label: "Chord Reveal", key: "chord", display: formatKeyLabel(keyBindings.chord) }].map((binding) => (
+                <div key={binding.key} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, marginBottom: 3, color: darkMode ? "#CCCCCC" : "#555" }}>{binding.label}</div>
+                  <button
+                    onClick={() => setIsRebindingKey(binding.key)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      fontSize: 11,
+                      backgroundColor: isRebindingKey === binding.key ? "#ffeb3b" : (darkMode ? "#333333" : "#f0f0f0"),
+                      border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                      borderRadius: 3,
+                      cursor: "pointer",
+                      fontWeight: "bold",
+                      color: isRebindingKey === binding.key ? "#000" : (darkMode ? "#FFFFFF" : "#333")
+                    }}
+                  >
+                    {isRebindingKey === binding.key ? "Press any key..." : binding.display}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 8, color: darkMode ? "#FFFFFF" : "#333" }}>Chord Button Mode</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setChordButtonMode("toggle")}
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    backgroundColor: chordButtonMode === "toggle" ? "#4CAF50" : (darkMode ? "#333333" : "#f0f0f0"),
+                    color: chordButtonMode === "toggle" ? "#FFFFFF" : (darkMode ? "#FFFFFF" : "#000000"),
+                    border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                    borderRadius: 3,
+                    fontWeight: "bold",
+                    flex: 1
+                  }}
+                >
+                  Toggle
+                </button>
+                <button
+                  onClick={() => setChordButtonMode("one-shot")}
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    backgroundColor: chordButtonMode === "one-shot" ? "#4CAF50" : (darkMode ? "#333333" : "#f0f0f0"),
+                    color: chordButtonMode === "one-shot" ? "#FFFFFF" : (darkMode ? "#FFFFFF" : "#000000"),
+                    border: `1px solid ${darkMode ? "#666666" : "#999"}`,
+                    borderRadius: 3,
+                    fontWeight: "bold",
+                    flex: 1
+                  }}
+                >
+                  One-shot
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: darkMode ? "#999999" : "#666", marginTop: 6 }}>
+                Toggle stays on. One-shot turns off after a successful chord.
+              </div>
+            </div>
           </div>
 
             <button
               onClick={() => {
-                const defaultBindings = {
-                  up: "w",
-                  down: "s",
-                  left: "a",
-                  right: "d",
-                  flagUp: "arrowup",
-                  flagDown: "arrowdown",
-                  flagLeft: "arrowleft",
-                  flagRight: "arrowright"
-                };
+                const defaultBindings = { ...DEFAULT_KEY_BINDINGS };
                 setKeyBindings(defaultBindings);
                 localStorage.setItem("minestickerKeyBindings", JSON.stringify(defaultBindings));
                 setIsRebindingKey(null);
@@ -2724,32 +2723,8 @@ export default function App() {
 
         <div style={{ marginTop: 24, maxWidth: 700 }}>
           <div style={{ fontSize: 11, color: "#555", marginTop: 12, lineHeight: 1.6 }}>
-            <div>
-              Any Suggestion, Feedback or Bug Report?
-              <a href="https://minesticker-support.straw.page" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                &nbsp;Send Anonymously via My MineSticker Straw.Page!
-              </a><br />
-            </div>
-             <div style={{ fontWeight: "bold", marginBottom: 4 }}>Changelogs (GMT+7):</div>
-            <div>Version 0.1.0: Website is Deployed (3 P.M, Feb 4, 2026) </div>
-            <div>Version 0.2.0: Fixed Page Scroll when using Arrow; Added Diagonal Movement, Custom Keybind, Quick Start/Restart and other Q.O.Ls!; Added Hard Reset! (Feb 5, 2026)</div>
-            <div>Version 0.3.0: Added Custom Mode and No Guessing Mode [Experimental] (Feb 6, 2026)</div>
-            <div>Version 0.3.1: Improved No Guessing Mode Logic (Feb 6, 2026)</div>
-            <div style={{ fontWeight: "bold", marginBottom: 4 }}>  </div>
-            <div style={{ fontWeight: "bold", marginBottom: 4 }}>Credit:</div>
-            <div>Website and TDL's texture were made by&nbsp;
-              <a href="https://x.com/scottandersinn" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                ScottAndersinn
-              </a></div>
-            <div>Explosion Animation and Sound Effect were taken directly from&nbsp;
-              <a href="https://www.youtube.com/watch?v=PCtr04cnx5A" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                Animator vs Animation 3 - Alan Becker
-              </a></div>
-            <div>Credit to Black Squirrel for&nbsp;
-              <a href="https://www.spriters-resource.com/pc_computer/minesweeper/asset/19849/" target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc", textDecoration: "underline" }}>
-                Winmine 31/NT4 and 2000+ Texture!
-              </a>
-            </div>
+            <PatchNotes />
+            <Credits />
           </div>
         </div>
       </section>
