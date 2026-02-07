@@ -37,7 +37,7 @@ export default function HeaderSection({
       >
         <div className="p-4 bg-gray-900 text-white rounded-lg">
           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
-            Version 0.3.2 - February 6th 2026 (GMT +7)
+            Version 0.3.3 - February 7th 2026 (GMT +7)
           </p>
           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
             Inspired by Animator vs Animation 3 - Alan Becker
