@@ -26,6 +26,7 @@ export default function PatchNotes() {
       </div>
       <div>Version 0.3.1: Improved No Guessing Mode Logic (Feb 6, 2026)</div>
       <div>Version 0.3.2: Fixed bugs, Added Jumping and Chording! (Feb 6, 2026)</div>
+      <div>Version 0.3.3: Improved Dark Mode and Responsiveness of control for bigger board on Mobile (Feb 7, 2026)</div>
       <div style={{ fontWeight: "bold", marginBottom: 4 }}>&nbsp;</div>
     </>
   );

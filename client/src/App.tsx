@@ -285,6 +285,14 @@ export default function App() {
     localStorage.setItem("minestickerDarkMode", JSON.stringify(darkMode));
   }, [darkMode]);
 
+  useEffect(() => {
+    const background = darkMode ? "#0F0F12" : "#ffffff";
+    const textColor = darkMode ? "#FFFFFF" : "#000000";
+    document.documentElement.style.backgroundColor = background;
+    document.body.style.backgroundColor = background;
+    document.body.style.color = textColor;
+  }, [darkMode]);
+
   // Save collapsed state for sections to localStorage
   useEffect(() => {
     localStorage.setItem("minestickerInstructionsCollapsed", JSON.stringify(isInstructionsCollapsed));
@@ -1888,9 +1896,10 @@ export default function App() {
     <div style={{ 
       padding: 12, 
       fontFamily: "sans-serif",
-      backgroundColor: darkMode ? "#1A1A1E" : "#ffffff",
+      backgroundColor: darkMode ? "#0F0F12" : "#ffffff",
       color: darkMode ? "#FFFFFF" : "#000000",
       minHeight: "100vh",
+      minWidth: "fit-content",
       transition: "background-color 0.3s ease, color 0.3s ease"
     }}>
       {/* <h1>MineSticker</h1>
@@ -2142,157 +2151,158 @@ export default function App() {
           </div>
         )}
         
-        {/* Game board with counter and matrix */}
-        <div style={{
-          border: "8px solid",
-          borderTopColor: "#ffffff",
-          borderLeftColor: "#ffffff",
-          borderBottomColor: "#808080",
-          borderRightColor: "#808080",
-          width: "fit-content",
-          boxShadow: "4px 4px 8px rgba(0, 0, 0, 0.3)",
-          overflow: "visible"
-        }}>
-          {/* Counter displays */}
-          <div style={{ 
-            border: `8px solid ${darkMode ? "#C6C6C6" : "#C6C6C6"}`,
-            width: "fit-content"
+        <div style={{ width: "fit-content" }}>
+          {/* Game board with counter and matrix */}
+          <div style={{
+            border: "8px solid",
+            borderTopColor: "#ffffff",
+            borderLeftColor: "#ffffff",
+            borderBottomColor: "#808080",
+            borderRightColor: "#808080",
+            width: "fit-content",
+            boxShadow: "4px 4px 8px rgba(0, 0, 0, 0.3)",
+            overflow: "visible"
           }}>
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              width: gridSize.cols * 16 - 8,
-              background: darkMode ? "#C6C6C6" : "#C6C6C6",
-              border: "4px solid #808080",
-              borderRightColor: darkMode ? "#ffffff" : "#ffffff",
-              borderBottomColor: darkMode ? "#ffffff" : "#ffffff",
-              padding: "4px 4px",
-              boxSizing: "content-box",
-              position: "relative"
+            {/* Counter displays */}
+            <div style={{ 
+              border: `8px solid ${darkMode ? "#C6C6C6" : "#C6C6C6"}`,
+              width: "fit-content"
             }}>
-              {renderThreeDigitNumber(remainingMines)}
-              <button
-                type="button"
-                onMouseDown={() => setIsFacePressed(true)}
-                onMouseUp={() => setIsFacePressed(false)}
-                onMouseLeave={() => setIsFacePressed(false)}
-                onClick={() => {
-                  setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
-                  if (stepOnBlockAudio.current) {
-                    stepOnBlockAudio.current.currentTime = 0;
-                    stepOnBlockAudio.current.play().catch(() => {});
-                  }
-                }}
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                width: gridSize.cols * 16 - 8,
+                background: darkMode ? "#C6C6C6" : "#C6C6C6",
+                border: "4px solid #808080",
+                borderRightColor: darkMode ? "#ffffff" : "#ffffff",
+                borderBottomColor: darkMode ? "#ffffff" : "#ffffff",
+                padding: "4px 4px",
+                boxSizing: "content-box",
+                position: "relative"
+              }}>
+                {renderThreeDigitNumber(remainingMines)}
+                <button
+                  type="button"
+                  onMouseDown={() => setIsFacePressed(true)}
+                  onMouseUp={() => setIsFacePressed(false)}
+                  onMouseLeave={() => setIsFacePressed(false)}
+                  onClick={() => {
+                    setDifficulty(gridSize.rows, gridSize.cols, mineCount, difficultyType);
+                    if (stepOnBlockAudio.current) {
+                      stepOnBlockAudio.current.currentTime = 0;
+                      stepOnBlockAudio.current.play().catch(() => {});
+                    }
+                  }}
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 24,
+                    height: 24,
+                    padding: 0,
+                    border: "none",
+                    backgroundColor: "transparent",
+                    backgroundImage: `url(${SPRITE_SHEET})`,
+                    backgroundPosition: `-${getFaceCoords.x1}px -${getFaceCoords.y1}px`,
+                    backgroundSize: "auto",
+                    cursor: "pointer"
+                  }}
+                  aria-label="Reset game"
+                />
+                {renderThreeDigitNumber(timer)}
+              </div>
+            </div>
+
+            <div style={{ border: "8px solid #C6C6C6", width: "fit-content" }}>
+              <div
                 style={{
-                  position: "absolute",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 24,
-                  height: 24,
-                  padding: 0,
-                  border: "none",
-                  backgroundColor: "transparent",
-                  backgroundImage: `url(${SPRITE_SHEET})`,
-                  backgroundPosition: `-${getFaceCoords.x1}px -${getFaceCoords.y1}px`,
-                  backgroundSize: "auto",
-                  cursor: "pointer"
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${gridSize.cols}, 16px)`,
+                  position: "relative",
+                  width: "fit-content",
+                  background: "#f0f0f0",
+                  border: "4px solid #808080",
+                  borderRightColor: "#ffffff",
+                  borderBottomColor: "#ffffff",
+                  overflow: "visible"
                 }}
-                aria-label="Reset game"
-              />
-              {renderThreeDigitNumber(timer)}
+              >
+            {localMatrix.data.flat().map((tile: Tile, i: number) => {
+              const { x1, y1, x2, y2 } = tile.coords;
+              const width = x2 - x1 + 1;
+              const height = y2 - y1 + 1;
+              const row = Math.floor(i / gridSize.cols);
+              const col = i % gridSize.cols;
+
+              return (
+                <div
+                  key={i}
+                  onClick={() => {
+                    if (!gameStarted) {
+                      // In no-guessing mode, regenerate board with this position as start
+                      if (gameMode === "no-guessing") {
+                        const newMatrix = generateNoGuessingBoard(gridSize.rows, gridSize.cols, mineCount, row, col);
+                        setLocalMatrix(newMatrix);
+                      }
+                      
+                      // First, clear mines from the starter area
+                      setLocalMatrix((prev: Matrix<Tile>) => {
+                        const next = cloneMatrix(prev);
+                        clearStarterArea(next, row, col);
+                        skipNextAutoSaveRef.current = true;
+                        saveGameState(next, {
+                          charPos: { row, col },
+                          status: "playing",
+                          timer: 0,
+                          gameStarted: true,
+                          firstMove: true
+                        });
+                        return next;
+                      });
+                      
+                      setGameStarted(true);
+                      setCharPos({ row, col });
+                      setIntroTargetPos({ row, col });
+                      setIsIntro(true);
+                      setIntroFrameIndex(0);
+                      // Tile will be revealed at frame 6 of intro animation
+                    }
+                  }}
+                  style={{
+                    width,
+                    height,
+                    backgroundImage: `url(${SPRITE_SHEET})`,
+                    backgroundPosition: `-${x1}px -${y1}px`,
+                    backgroundSize: "auto",
+                    cursor: "pointer"
+                  }}
+                />
+              );
+            })}
+            <GameAnimations
+              gridSize={gridSize}
+              charPos={charPos}
+              activeExplosions={[...activeExplosions, ...characterExplosions]}
+              scorchMarks={scorchMarks}
+              isIntro={isIntro}
+              introFrameIndex={introFrameIndex}
+              introTargetPos={introTargetPos}
+              introFrameCoords={getIntroFrame}
+              gameStarted={gameStarted}
+              isCheer={isCheer}
+              cheerFrameIndex={cheerFrameIndex}
+              currentCharacterSprite={getCurrentCharacterSprite}
+              isMoving={isMoving}
+              shouldMirrorWalk={shouldMirrorWalk}
+              gridSizePx={GRID_SIZE}
+              kaboomFrameSize={KABOOM_FRAME_SIZE}
+              scorchFrameSize={SCORCH_FRAME_SIZE}
+            />
+            
             </div>
           </div>
-
-          <div style={{ border: "8px solid #C6C6C6", width: "fit-content" }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${gridSize.cols}, 16px)`,
-                position: "relative",
-                width: "fit-content",
-                background: "#f0f0f0",
-                border: "4px solid #808080",
-                borderRightColor: "#ffffff",
-                borderBottomColor: "#ffffff",
-                overflow: "visible"
-              }}
-            >
-          {localMatrix.data.flat().map((tile: Tile, i: number) => {
-            const { x1, y1, x2, y2 } = tile.coords;
-            const width = x2 - x1 + 1;
-            const height = y2 - y1 + 1;
-            const row = Math.floor(i / gridSize.cols);
-            const col = i % gridSize.cols;
-
-            return (
-              <div
-                key={i}
-                onClick={() => {
-                  if (!gameStarted) {
-                    // In no-guessing mode, regenerate board with this position as start
-                    if (gameMode === "no-guessing") {
-                      const newMatrix = generateNoGuessingBoard(gridSize.rows, gridSize.cols, mineCount, row, col);
-                      setLocalMatrix(newMatrix);
-                    }
-                    
-                    // First, clear mines from the starter area
-                    setLocalMatrix((prev: Matrix<Tile>) => {
-                      const next = cloneMatrix(prev);
-                      clearStarterArea(next, row, col);
-                      skipNextAutoSaveRef.current = true;
-                      saveGameState(next, {
-                        charPos: { row, col },
-                        status: "playing",
-                        timer: 0,
-                        gameStarted: true,
-                        firstMove: true
-                      });
-                      return next;
-                    });
-                    
-                    setGameStarted(true);
-                    setCharPos({ row, col });
-                    setIntroTargetPos({ row, col });
-                    setIsIntro(true);
-                    setIntroFrameIndex(0);
-                    // Tile will be revealed at frame 6 of intro animation
-                  }
-                }}
-                style={{
-                  width,
-                  height,
-                  backgroundImage: `url(${SPRITE_SHEET})`,
-                  backgroundPosition: `-${x1}px -${y1}px`,
-                  backgroundSize: "auto",
-                  cursor: "pointer"
-                }}
-              />
-            );
-          })}
-          <GameAnimations
-            gridSize={gridSize}
-            charPos={charPos}
-            activeExplosions={[...activeExplosions, ...characterExplosions]}
-            scorchMarks={scorchMarks}
-            isIntro={isIntro}
-            introFrameIndex={introFrameIndex}
-            introTargetPos={introTargetPos}
-            introFrameCoords={getIntroFrame}
-            gameStarted={gameStarted}
-            isCheer={isCheer}
-            cheerFrameIndex={cheerFrameIndex}
-            currentCharacterSprite={getCurrentCharacterSprite}
-            isMoving={isMoving}
-            shouldMirrorWalk={shouldMirrorWalk}
-            gridSizePx={GRID_SIZE}
-            kaboomFrameSize={KABOOM_FRAME_SIZE}
-            scorchFrameSize={SCORCH_FRAME_SIZE}
-          />
-          
           </div>
-        </div>
-        </div>
         {/* <div style={{ marginTop: 12, fontSize: 12 }}>
           <p>Position: Row {charPos.row}, Col {charPos.col}</p>
           <p style={{ color: "#666" }}>Use WASD to move</p>
@@ -2300,7 +2310,7 @@ export default function App() {
             Status: {status}
           </p>
         </div> */}
-        <div style={{ marginTop: 16, display: "flex", gap: 24, flexWrap: "wrap" }}>
+        <div style={{ marginTop: 16, display: "flex", gap: 24, flexWrap: "wrap", width: "100%" }}>
           <div>
             <div style={{ fontSize: 12, marginBottom: 6 }}></div>
             <div
@@ -2358,6 +2368,7 @@ export default function App() {
               {renderKeyButton(KEY_COORDS.arrowDownRight, () => toggleFlagAt(charPos.row + 1, charPos.col + 1), "Flag down-right")}
             </div>
           </div>
+        </div>
         </div>
 
         <div style={{ marginTop: 24, maxWidth: 300 }}>
