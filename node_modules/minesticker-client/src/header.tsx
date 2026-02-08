@@ -1,6 +1,7 @@
 interface HeaderSectionProps {
   isInstructionsCollapsed: boolean;
   darkMode: boolean;
+  isOnline: boolean;
   onToggleInstructions: () => void;
   onHardReset: () => void;
 }
@@ -8,6 +9,7 @@ interface HeaderSectionProps {
 export default function HeaderSection({
   isInstructionsCollapsed,
   darkMode,
+  isOnline,
   onToggleInstructions,
   onHardReset
 }: HeaderSectionProps) {
@@ -26,6 +28,18 @@ export default function HeaderSection({
       >
         <span style={{ fontSize: 18 }}>{isInstructionsCollapsed ? "▶" : "▼"}</span>
         <h2 style={{ margin: 0, display: "inline" }}>Minesweeper (But with The Dark Lord)</h2>
+        <span
+          style={{
+            marginLeft: 8,
+            fontSize: 12,
+            padding: "2px 8px",
+            borderRadius: 999,
+            backgroundColor: isOnline ? "#1f9d55" : "#c53030",
+            color: "#ffffff"
+          }}
+        >
+          {isOnline ? "Online" : "Offline"}
+        </span>
       </div>
       <div
         style={{

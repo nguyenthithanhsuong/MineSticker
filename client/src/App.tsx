@@ -87,6 +87,9 @@ export default function App() {
   const [state, setState] = useState<GameState | null>(null);
   const [gridSize, setGridSize] = useState({ rows: 9, cols: 9 });
   const [mineCount, setMineCount] = useState(10);
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator !== "undefined" ? navigator.onLine : true
+  );
   
   // Audio instances - lazy init
   const flagPlaceAudio = useRef<HTMLAudioElement | null>(null);
@@ -112,6 +115,19 @@ export default function App() {
         audio.current.load();
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
   
   const [localMatrix, setLocalMatrix] = useState(() =>
@@ -1916,6 +1932,7 @@ export default function App() {
         <HeaderSection
           isInstructionsCollapsed={isInstructionsCollapsed}
           darkMode={darkMode}
+          isOnline={isOnline}
           onToggleInstructions={() => setIsInstructionsCollapsed(!isInstructionsCollapsed)}
           onHardReset={hardReset}
         />
