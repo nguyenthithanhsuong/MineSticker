@@ -39,25 +39,26 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      caches.match("/").then((cached) =>
-        cached ||
-          fetch(request)
-            .then((response) => {
-              const responseClone = response.clone();
-              caches.open(CACHE_VERSION).then((cache) => cache.put("/", responseClone));
-              return response;
-            })
-            .catch(() => caches.match("/index.html"))
-      )
+      caches.match("/").then((cached) => {
+        if (cached) return cached;
+
+        return fetch(request)
+          .then((response) => {
+            const responseClone = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put("/", responseClone));
+            return response;
+          })
+          .catch(() =>
+            caches.match("/index.html").then((fallback) => fallback || new Response("", { status: 503 }))
+          );
+      })
     );
     return;
   }
 
   event.respondWith(
     caches.match(request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+      if (cached) return cached;
 
       return fetch(request)
         .then((response) => {
@@ -69,7 +70,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_VERSION).then((cache) => cache.put(request, responseClone));
           return response;
         })
-        .catch(() => caches.match(request));
+        .catch(() => new Response("", { status: 504 }));
     })
   );
 });
