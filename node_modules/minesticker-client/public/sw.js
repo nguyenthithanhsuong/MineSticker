@@ -1,13 +1,55 @@
-const CACHE_VERSION = "minesticker-v2";
-const CORE_ASSETS = ["/", "/index.html"];
+const CACHE_VERSION = "minesticker-v3";
+const CORE_ASSETS = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/chartdl.png",
+  "/MineTextures.png",
+  "/MineTextures2x.png",
+  "/idle.png",
+  "/intro.png",
+  "/walk.png",
+  "/chillwalk.png",
+  "/panic.png",
+  "/dead.png",
+  "/placeflag.png",
+  "/cheer.png",
+  "/diagonal.png",
+  "/jump.png",
+  "/scorch.png",
+  "/kaboom.png",
+  "/kaboom.wav",
+  "/placeflag.wav",
+  "/chillwalk.wav",
+  "/steponblock.wav",
+  "/whoosh.wav"
+];
+
+const normalizePath = (filePath) => (filePath.startsWith("/") ? filePath : `/${filePath}`);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) =>
-      Promise.all(
-        CORE_ASSETS.map((url) => cache.add(url).catch(() => undefined))
-      )
-    )
+    caches.open(CACHE_VERSION).then(async (cache) => {
+      await Promise.all(CORE_ASSETS.map((url) => cache.add(url).catch(() => undefined)));
+
+      try {
+        const manifestResponse = await fetch("/manifest.json", { cache: "no-store" });
+        if (manifestResponse.ok) {
+          const manifest = await manifestResponse.json();
+          const files = Object.values(manifest).flatMap((entry) => {
+            const collected = [entry.file];
+            if (entry.css) collected.push(...entry.css);
+            if (entry.assets) collected.push(...entry.assets);
+            return collected;
+          });
+          await Promise.all(
+            files.map((file) => cache.add(normalizePath(file)).catch(() => undefined))
+          );
+        }
+      } catch {
+        // Optional manifest; keep install resilient.
+      }
+    })
   );
   self.skipWaiting();
 });
